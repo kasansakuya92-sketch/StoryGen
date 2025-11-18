@@ -1,5 +1,6 @@
+
 // utils/contextEngine.ts
-import { Story, Scene, NodeImportanceFactors, StateDelta, StoryState, ContextChunk, ChunkType, ContextBudgets, ContextWeights, TextLine } from '../types.ts';
+import { Story, Scene, NodeImportanceFactors, StateDelta, StoryState, ContextChunk, ChunkType, ContextBudgets, ContextWeights, TextLine, CharactersData } from '../types.ts';
 
 const TYPE_BONUS: Record<ChunkType, number> = {
   local: 1.0,
@@ -125,7 +126,7 @@ function estimateTokens(text: string): number {
     return Math.ceil(text.length / 4);
 }
 
-export function buildContextChunks(story: Story, targetSceneId: string): ContextChunk[] {
+export function buildContextChunks(story: Story, characters: CharactersData, targetSceneId: string): ContextChunk[] {
     const chunks: ContextChunk[] = [];
     const targetScene = story.scenes[targetSceneId];
     if (!targetScene) return [];
@@ -182,7 +183,7 @@ export function buildContextChunks(story: Story, targetSceneId: string): Context
         if (scene.id === targetSceneId) {
             const textLines = (scene.dialogue.filter(d => d.type === 'text') as TextLine[]).slice(-5);
             textLines.forEach((line, i) => {
-                const text = `${story.characters[line.characterId || '']?.name || 'Narrator'}: ${line.text}`;
+                const text = `${characters[line.characterId || '']?.name || 'Narrator'}: ${line.text}`;
                 chunks.push({
                     id: `${scene.id}-local-${i}`, text, type: 'local', tokens: estimateTokens(text),
                     graphDistance: 0, timeDistance: textLines.length - i, charOverlap: 1, embedSim: 0, nodeImportance: importanceScore
@@ -202,7 +203,7 @@ export function buildContextChunks(story: Story, targetSceneId: string): Context
 
     // --- Character Chunks ---
     const presentChars = new Set(targetScene.characters.map(c => c.characterId));
-    Object.values(story.characters).forEach(char => {
+    Object.values(characters).forEach(char => {
         if(presentChars.has(char.id)){
             const text = `Character: ${char.name}. Appearance: ${char.appearance}. Talking style: ${char.talkingStyle}.`;
             chunks.push({

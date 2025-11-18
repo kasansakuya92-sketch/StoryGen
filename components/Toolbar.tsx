@@ -1,3 +1,5 @@
+
+
 import React from 'react';
 import { exportProjectAsJson } from '../utils/export.ts';
 import { Project } from '../types.ts';
@@ -7,6 +9,8 @@ import AIIcon from './icons/AIIcon.tsx';
 interface ToolbarProps {
   activeProject: Project | null;
   onToggleCharManager: () => void;
+  onToggleVarManager: () => void;
+  onToggleAssetManager: () => void;
   editorMode: 'FORM' | 'NODE' | 'DOC';
   onToggleEditorMode: () => void;
   onOpenStoryPlanner: () => void;
@@ -22,7 +26,7 @@ const SettingsIcon = () => (
 );
 
 
-const Toolbar: React.FC<ToolbarProps> = ({ activeProject, onToggleCharManager, editorMode, onToggleEditorMode, onOpenStoryPlanner, onGoToHub, onGoToSettings }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ activeProject, onToggleCharManager, onToggleVarManager, onToggleAssetManager, editorMode, onToggleEditorMode, onOpenStoryPlanner, onGoToHub, onGoToSettings }) => {
   const handleExport = () => {
     if (activeProject) {
       exportProjectAsJson(activeProject);
@@ -71,6 +75,24 @@ const Toolbar: React.FC<ToolbarProps> = ({ activeProject, onToggleCharManager, e
         >
            <span className="hidden sm:inline">Characters</span>
            <span className="sm:hidden">Chars</span>
+        </button>
+        <button
+          onClick={onToggleVarManager}
+          className="px-3 py-1.5 bg-secondary text-secondary-foreground text-xs rounded hover:bg-secondary/90 disabled:opacity-50"
+          disabled={!activeProject}
+          title="Manage Variables"
+        >
+           <span className="hidden sm:inline">Variables</span>
+           <span className="sm:hidden">Vars</span>
+        </button>
+        <button
+          onClick={onToggleAssetManager}
+          className="px-3 py-1.5 bg-secondary text-secondary-foreground text-xs rounded hover:bg-secondary/90 disabled:opacity-50"
+          disabled={!activeProject}
+          title="Manage Backgrounds"
+        >
+           <span className="hidden sm:inline">Assets</span>
+           <span className="sm:hidden">Img</span>
         </button>
         <button
           onClick={handleExport}

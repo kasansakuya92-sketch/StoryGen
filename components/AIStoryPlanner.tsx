@@ -1,15 +1,84 @@
+
 import React, { useState } from 'react';
 import { generateStoryPlan, generateDialogueForScene } from '../utils/ai.ts';
-import { ScenesData, CharactersData, TextLine, SceneCharacter, DialogueLength, SceneLength, DialogueItem, Scene, Character, Story } from '../types.ts';
+import { ScenesData, CharactersData, TextLine, SceneCharacter, DialogueLength, SceneLength, DialogueItem, Scene, Character, Story, StoryVariable } from '../types.ts';
 import { useSettings } from '../contexts/SettingsContext.tsx';
 import AIIcon from './icons/AIIcon.tsx';
 import { defaultCharacters } from '../story.ts';
 
 
 interface AIStoryPlannerProps {
-  onPlanGenerated: (plan: { name: string, scenes: ScenesData, characters: CharactersData }) => void;
+  onPlanGenerated: (plan: { name: string, scenes: ScenesData, characters: CharactersData, variables: Record<string, StoryVariable> }) => void;
   onClose: () => void;
 }
+
+// Slider Helper Component
+interface SliderOption<T> {
+  value: T;
+  label: string;
+  subLabel: string;
+}
+
+const SliderField = <T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled
+}: {
+  label: string;
+  value: T;
+  options: SliderOption<T>[];
+  onChange: (val: T) => void;
+  disabled: boolean;
+}) => {
+  const currentIndex = options.findIndex(o => o.value === value);
+  
+  return (
+    <div className="mb-6">
+      <div className="flex justify-between items-baseline mb-3">
+        <label className="text-sm font-bold text-foreground/80">{label}</label>
+        <span className="text-xs font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded">
+          {options[currentIndex].subLabel}
+        </span>
+      </div>
+      <div className="relative px-2 py-1">
+        {/* Track Background for visual milestones */}
+        <div className="absolute top-4 left-2 right-2 h-1 flex justify-between items-center pointer-events-none z-0 px-1.5">
+             {options.map((_, idx) => (
+                 <div key={idx} className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${idx <= currentIndex ? 'bg-primary' : 'bg-border'}`}></div>
+             ))}
+        </div>
+
+        <input
+          type="range"
+          min="0"
+          max={options.length - 1}
+          step="1"
+          value={currentIndex}
+          onChange={(e) => onChange(options[parseInt(e.target.value)].value)}
+          disabled={disabled}
+          className="w-full h-2 bg-secondary/30 rounded-lg appearance-none cursor-pointer accent-primary focus:outline-none focus:ring-2 focus:ring-primary/50 relative z-10 bg-transparent"
+        />
+        
+        <div className="flex justify-between mt-2 -mx-3">
+          {options.map((opt, idx) => (
+            <div 
+              key={String(opt.value)} 
+              className={`flex flex-col items-center w-20 text-center cursor-pointer transition-all duration-200 group`}
+              onClick={() => !disabled && onChange(opt.value)}
+            >
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${idx === currentIndex ? 'text-primary scale-110' : 'text-foreground/50 group-hover:text-foreground/80'}`}>
+                {opt.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 
 const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClose }) => {
   const [prompt, setPrompt] = useState('');
@@ -18,9 +87,22 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
   const [error, setError] = useState<string | null>(null);
   const [shouldGenerateDialogue, setShouldGenerateDialogue] = useState(true);
   const [dialogueLength, setDialogueLength] = useState<DialogueLength>('Short');
-  const [sceneLength, setSceneLength] = useState<SceneLength>('Short');
+  const [sceneLength, setSceneLength] = useState<SceneLength | 'Epic'>('Short');
   const [storyType, setStoryType] = useState<'branching' | 'linear'>('branching');
   const { settings } = useSettings();
+
+  const sceneLengthOptions: SliderOption<SceneLength | 'Epic'>[] = [
+    { value: 'Short', label: 'Short', subLabel: '3-4 Scenes' },
+    { value: 'Medium', label: 'Medium', subLabel: '5-6 Scenes' },
+    { value: 'Long', label: 'Long', subLabel: '7-8 Scenes' },
+    { value: 'Epic', label: 'Epic', subLabel: '12-15 Scenes' },
+  ];
+
+  const dialogueLengthOptions: SliderOption<DialogueLength>[] = [
+    { value: 'Short', label: 'Concise', subLabel: '3-5 lines/scene' },
+    { value: 'Medium', label: 'Standard', subLabel: '6-8 lines/scene' },
+    { value: 'Long', label: 'Detailed', subLabel: '9-12 lines/scene' },
+  ];
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
@@ -83,14 +165,72 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
           finalCharacters = defaultCharacters;
       }
 
+      // --- Variable Processing ---
+      let processedVariables: Record<string, StoryVariable> = {};
+      if (Array.isArray(plan.variables)) {
+          plan.variables.forEach((v: any) => {
+              if (v && v.name && v.type && v.initialValue !== undefined) {
+                  const id = v.name.toLowerCase().replace(/\s+/g, '_').replace(/[^\w-]/g, '');
+                  let finalId = id;
+                  let counter = 1;
+                  while(processedVariables[finalId]) finalId = `${id}_${counter++}`;
+                  
+                  let parsedValue = v.initialValue;
+                  if (v.type === 'number') parsedValue = Number(v.initialValue);
+                  if (v.type === 'boolean') parsedValue = v.initialValue === 'true' || v.initialValue === true;
+                  
+                  processedVariables[finalId] = {
+                      id: finalId,
+                      name: v.name,
+                      type: v.type,
+                      initialValue: parsedValue
+                  };
+              }
+          });
+      }
+
+
       // --- PROGRAMMATICALLY CREATE STORY STRUCTURE ---
       const scenesFromAI = plan.scenes;
+      
       if (storyType === 'branching' && scenesFromAI.length >= 3) {
-          scenesFromAI[0].outcome = { type: 'choice', choices: [{ text: `"${scenesFromAI[1].name}"`, nextSceneId: scenesFromAI[1].id }, { text: `"${scenesFromAI[2].name}"`, nextSceneId: scenesFromAI[2].id }] };
-          for (let i = 1; i < scenesFromAI.length; i++) {
-              scenesFromAI[i].outcome = { type: 'end_story' }; // End branches for simplicity
+          // Creates a tree: Scene 0 -> Choice(Scene 1, Scene 2)
+          // Then distributes remaining scenes across the two branches.
+          scenesFromAI[0].outcome = { 
+              type: 'choice', 
+              choices: [
+                  { text: `Go to ${scenesFromAI[1].name}`, nextSceneId: scenesFromAI[1].id }, 
+                  { text: `Go to ${scenesFromAI[2].name}`, nextSceneId: scenesFromAI[2].id }
+              ] 
+          };
+          
+          let lastIdA = scenesFromAI[1].id;
+          let lastIdB = scenesFromAI[2].id;
+          
+          // Start loop from index 3 to distribute subsequent scenes
+          for (let i = 3; i < scenesFromAI.length; i++) {
+              const currentScene = scenesFromAI[i];
+              // Distribute evenly: Odd index to Branch A, Even to Branch B
+              if (i % 2 !== 0) { 
+                  const prevScene = scenesFromAI.find((s: any) => s.id === lastIdA);
+                  if (prevScene) prevScene.outcome = { type: 'transition', nextSceneId: currentScene.id };
+                  lastIdA = currentScene.id;
+              } else { 
+                  const prevScene = scenesFromAI.find((s: any) => s.id === lastIdB);
+                  if (prevScene) prevScene.outcome = { type: 'transition', nextSceneId: currentScene.id };
+                  lastIdB = currentScene.id;
+              }
           }
+          
+          // Terminate ends of branches
+          const finalA = scenesFromAI.find((s: any) => s.id === lastIdA);
+          if (finalA) finalA.outcome = { type: 'end_story' };
+          
+          const finalB = scenesFromAI.find((s: any) => s.id === lastIdB);
+          if (finalB) finalB.outcome = { type: 'end_story' };
+          
       } else {
+          // Linear Sequence
           scenesFromAI.forEach((scene: any, index: number) => {
               scene.outcome = (index < scenesFromAI.length - 1) ? { type: 'transition', nextSceneId: scenesFromAI[index + 1].id } : { type: 'end_story' };
           });
@@ -134,19 +274,23 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
             originalOutcomes[scene.id] = newScenes[scene.id].dialogue.slice(-1)[0];
         });
         
+        // Note: We construct a temporary Story object to pass to the AI. 
+        // Since characters are now separate, we pass them within this temporary object context
+        // but the utility function will need to extract them correctly.
         const tempStoryForDialogueGen: Story = {
             id: `temp_story_${Date.now()}`,
             name: plan.title || "AI Generated Story",
-            characters: finalCharacters,
             scenes: newScenes,
-            startSceneId: plan.scenes[0]?.id || 'start'
+            startSceneId: plan.scenes[0]?.id || 'start',
+            variables: processedVariables
         };
 
         for (let i = 0; i < scenesToProcess.length; i++) {
             const scene = scenesToProcess[i];
             const originalOutcome = originalOutcomes[scene.id];
             try {
-                const newDialogueLines = await generateDialogueForScene(settings, tempStoryForDialogueGen, scene.id, dialogueLength, false, 'text_only');
+                // Pass finalCharacters separately to the utility
+                const newDialogueLines = await generateDialogueForScene(settings, tempStoryForDialogueGen, scene.id, finalCharacters, dialogueLength, false, 'text_only');
                 if (Array.isArray(newDialogueLines) && newDialogueLines.every(item => item.type === 'text')) {
                     newScenes[scene.id].dialogue = [...newDialogueLines, originalOutcome];
                 } else {
@@ -160,7 +304,12 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
         }
       }
 
-      onPlanGenerated({ name: plan.title || "AI Generated Story", scenes: newScenes, characters: finalCharacters });
+      onPlanGenerated({ 
+          name: plan.title || "AI Generated Story", 
+          scenes: newScenes, 
+          characters: finalCharacters,
+          variables: processedVariables 
+      });
       onClose();
 
     } catch (e) {
@@ -173,7 +322,7 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
   };
 
   const commonSelectClass = "mt-1 block w-full bg-card/80 border border-border rounded-md p-2 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none";
-  const commonLabelClass = "block text-sm font-medium text-foreground/80";
+  const commonLabelClass = "block text-sm font-bold text-foreground/80 mb-1";
 
   return (
     <div className="fixed inset-0 bg-onyx/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -181,29 +330,32 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
         <header className="p-4 border-b border-border">
           <h2 className="text-xl font-bold">AI Story Planner</h2>
         </header>
-        <div className="p-4 space-y-4">
-          <p className="text-sm text-foreground/70">Describe the story you want to create. The AI will generate a set of characters and scenes to get you started.</p>
+        <div className="p-4 space-y-4 overflow-y-auto max-h-[75vh]">
+          <p className="text-sm text-foreground/70">Describe the story you want to create. The AI will generate characters, plot, and game variables.</p>
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="e.g., A sci-fi detective story on a space station."
-            className="w-full h-24 bg-card/80 border border-border rounded-md p-2 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none"
+            className="w-full h-24 bg-card/80 border border-border rounded-md p-2 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none resize-none"
             disabled={isLoading}
           />
-           <div>
-            <label htmlFor="scene-length" className={commonLabelClass}>Scenes Detail</label>
-            <select
-                id="scene-length"
-                value={sceneLength}
-                onChange={(e) => setSceneLength(e.target.value as SceneLength)}
-                className={commonSelectClass}
-                disabled={isLoading}
-            >
-                <option value="Short">Short (3-4 scenes)</option>
-                <option value="Medium">Medium (5-6 scenes)</option>
-                <option value="Long">Long (7-8 scenes)</option>
-            </select>
-          </div>
+          
+          <SliderField 
+            label="Story Length" 
+            value={sceneLength} 
+            options={sceneLengthOptions} 
+            onChange={setSceneLength} 
+            disabled={isLoading} 
+          />
+
+          <SliderField 
+            label="Dialogue Detail" 
+            value={dialogueLength} 
+            options={dialogueLengthOptions} 
+            onChange={setDialogueLength} 
+            disabled={isLoading} 
+          />
+
           <div>
             <label htmlFor="story-type" className={commonLabelClass}>Story Structure</label>
             <select
@@ -217,21 +369,8 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
                 <option value="linear">Linear (no choices)</option>
             </select>
           </div>
-          <div>
-            <label htmlFor="dialogue-length" className={commonLabelClass}>Dialogue Detail</label>
-            <select
-                id="dialogue-length"
-                value={dialogueLength}
-                onChange={(e) => setDialogueLength(e.target.value as DialogueLength)}
-                className={commonSelectClass}
-                disabled={isLoading}
-            >
-                <option value="Short">Short (3-5 lines per scene)</option>
-                <option value="Medium">Medium (6-8 lines per scene)</option>
-                <option value="Long">Long (9-12 lines per scene)</option>
-            </select>
-          </div>
-          <div className="flex items-center">
+
+          <div className="flex items-center pt-2">
             <input 
               type="checkbox"
               id="generate-dialogue"
@@ -240,18 +379,18 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
               className="h-4 w-4 rounded border-border bg-card text-primary focus:ring-ring"
               disabled={isLoading}
             />
-            <label htmlFor="generate-dialogue" className="ml-2 block text-sm text-foreground/80">
+            <label htmlFor="generate-dialogue" className="ml-2 block text-sm text-foreground/80 font-medium">
               Generate initial dialogue for each scene
             </label>
           </div>
-          {error && <p className="text-destructive text-xs">{error}</p>}
+          {error && <p className="text-destructive text-xs font-bold bg-destructive/10 p-2 rounded">{error}</p>}
         </div>
         <footer className="p-4 border-t border-border flex justify-end gap-2">
           <button onClick={onClose} disabled={isLoading} className="px-4 py-2 bg-secondary text-secondary-foreground text-sm rounded hover:bg-secondary/90">Cancel</button>
           <button 
             onClick={handleGenerate} 
             disabled={isLoading || (settings.aiProvider === 'local' && !settings.localModelUrl)}
-            className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 disabled:opacity-50 w-40 flex items-center justify-center gap-2"
+            className="px-4 py-2 bg-primary text-primary-foreground text-sm font-bold rounded hover:bg-primary/90 disabled:opacity-50 w-40 flex items-center justify-center gap-2 shadow-md"
             title={settings.aiProvider === 'local' && !settings.localModelUrl ? 'Please set the Local Model URL in settings.' : ''}
           >
             {isLoading ? loadingMessage : <><AIIcon className="w-4 h-4" /> Generate Plan</>}

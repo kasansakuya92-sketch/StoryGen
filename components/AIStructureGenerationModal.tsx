@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Scene, CharactersData, ScenesData, AIStructureType, AIGeneratedScene, Story } from '../types.ts';
 import { generateSceneStructure } from '../utils/ai.ts';
@@ -8,6 +9,7 @@ interface AIStructureGenerationModalProps {
   isOpen: boolean;
   onClose: () => void;
   story: Story;
+  characters: CharactersData;
   onAddSceneStructure: (generated: { scenes: AIGeneratedScene[], connections: any }, sourceSceneId: string) => void;
 }
 
@@ -15,6 +17,7 @@ const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({
   isOpen,
   onClose,
   story,
+  characters,
   onAddSceneStructure,
 }) => {
   const [sourceSceneId, setSourceSceneId] = useState<string>(Object.keys(story.scenes)[0] || '');
@@ -47,6 +50,7 @@ const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({
             story,
             contextSceneIds,
             sourceSceneId,
+            characters,
             prompt,
             structureType
         );

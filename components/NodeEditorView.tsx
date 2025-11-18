@@ -1,4 +1,7 @@
-import React, { useCallback, useState, useRef, useEffect } from 'react';
+
+
+
+import React, { useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import ReactFlow, {
   useNodesState,
   useEdgesState,
@@ -14,7 +17,7 @@ import ReactFlow, {
   EdgeLabelRenderer,
   MarkerType,
 } from 'reactflow';
-import { ScenesData, Scene, CharactersData, AIGeneratedScene, Story } from '../types.ts';
+import { ScenesData, Scene, CharactersData, AIGeneratedScene, Story, BackgroundsData, Background as BackgroundType, SceneStatus, SceneCharacter, Character } from '../types.ts';
 import AIGenerationModal from './AIGenerationModal.tsx';
 import AIStructureGenerationModal from './AIStructureGenerationModal.tsx';
 import AIIcon from './icons/AIIcon.tsx';
@@ -24,12 +27,15 @@ interface NodeEditorViewProps {
   story: Story;
   scenes: ScenesData;
   characters: CharactersData;
+  backgrounds: BackgroundsData;
   onUpdateScene: (sceneId: string, updatedScene: Partial<Scene>) => void;
   onAddScene: (storyId: string) => void;
   onDeleteScene: (sceneId: string) => void;
   activeStoryId: string | null;
   onAddSceneStructure: (generated: { scenes: AIGeneratedScene[], connections: any }, sourceSceneId: string) => void;
 }
+
+type LensMode = 'default' | 'background' | 'logic' | 'character' | 'status';
 
 const TrashIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -93,13 +99,17 @@ const CustomEdge: React.FC<any> = ({
 // Custom Node Component for displaying a scene
 const FlowSceneNode: React.FC<{ data: { 
     scene: Scene, 
+    characters: CharactersData,
+    backgrounds: BackgroundsData,
+    incomingConditions: string[],
     onUpdateScene: NodeEditorViewProps['onUpdateScene'], 
     onDeleteScene: NodeEditorViewProps['onDeleteScene'],
     isSelectionMode: boolean,
     selectionState: 'context' | 'target' | 'none',
+    activeLens: LensMode,
     onNodeClick: (sceneId: string) => void,
 } }> = ({ data }) => {
-  const { scene, onUpdateScene, onDeleteScene, isSelectionMode, selectionState, onNodeClick } = data;
+  const { scene, characters, backgrounds, incomingConditions, onUpdateScene, onDeleteScene, isSelectionMode, selectionState, activeLens, onNodeClick } = data;
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [name, setName] = useState(scene.name);
@@ -143,6 +153,25 @@ const FlowSceneNode: React.FC<{ data: {
     }
   };
 
+  const handleBackgroundChange = (bgUrl: string) => {
+      onUpdateScene(scene.id, { background: bgUrl });
+  };
+
+  const handleStatusChange = (status: SceneStatus) => {
+      onUpdateScene(scene.id, { status });
+  };
+  
+  const handleCharacterToggle = (charId: string) => {
+      const exists = scene.characters.some(c => c.characterId === charId);
+      let newCharacters = [...scene.characters];
+      if (exists) {
+          newCharacters = newCharacters.filter(c => c.characterId !== charId);
+      } else {
+          newCharacters.push({ characterId: charId, spriteId: 'normal', position: 'center' });
+      }
+      onUpdateScene(scene.id, { characters: newCharacters });
+  };
+
 
   const handleDelete = () => {
       onDeleteScene(scene.id);
@@ -163,8 +192,19 @@ const FlowSceneNode: React.FC<{ data: {
       target: 'ring-2 ring-green-500 shadow-lg shadow-green-500/30',
       none: '',
   };
-  const nodeClasses = `bg-card/90 backdrop-blur-md border rounded-lg shadow-xl w-64 group relative transition-all duration-200 ${isSelectionMode ? `cursor-pointer ${selectionClasses[selectionState]}` : 'border-border'}`;
+  
+  const statusColors = {
+      draft: 'bg-secondary text-secondary-foreground border-secondary',
+      written: 'bg-yellow-500/20 border-yellow-500 text-yellow-700 dark:text-yellow-300',
+      polished: 'bg-blue-500/20 border-blue-500 text-blue-700 dark:text-blue-300',
+      final: 'bg-green-500/20 border-green-500 text-green-700 dark:text-green-300',
+  };
+  
+  const statusColorClass = activeLens === 'status' && scene.status 
+    ? statusColors[scene.status] 
+    : 'bg-secondary text-secondary-foreground border-border';
 
+  const nodeClasses = `bg-card/90 backdrop-blur-md border rounded-lg shadow-xl w-64 group relative transition-all duration-200 ${isSelectionMode ? `cursor-pointer ${selectionClasses[selectionState]}` : activeLens === 'status' && scene.status ? statusColors[scene.status].split(' ')[2] : 'border-border'}`;
 
   return (
     <div className={nodeClasses} onClick={() => isSelectionMode && onNodeClick(scene.id)}>
@@ -176,7 +216,7 @@ const FlowSceneNode: React.FC<{ data: {
         <TrashIcon />
       </button>
 
-      <div className="bg-secondary text-secondary-foreground px-3 py-1.5 font-bold text-sm rounded-t-md truncate" onDoubleClick={() => !isSelectionMode && setIsEditingName(true)}>
+      <div className={`${statusColorClass.split(' ').slice(0,2).join(' ')} px-3 py-1.5 font-bold text-sm rounded-t-md truncate flex justify-between items-center`} onDoubleClick={() => !isSelectionMode && setIsEditingName(true)}>
         {isEditingName ? (
             <input
                 ref={nameInputRef}
@@ -187,21 +227,145 @@ const FlowSceneNode: React.FC<{ data: {
                 className="w-full bg-background text-foreground p-0 m-0 border-0 outline-none ring-1 ring-ring rounded"
             />
         ) : (
-            scene.name
+            <span className="truncate">{scene.name}</span>
+        )}
+        {activeLens === 'status' && (
+             <span className="text-[10px] uppercase tracking-widest opacity-70 ml-2">{scene.status || 'DRAFT'}</span>
         )}
       </div>
-      <div className="p-3 text-xs text-foreground/80 border-b border-border/50 min-h-[40px]" onDoubleClick={() => !isSelectionMode && setIsEditingDesc(true)}>
-        {isEditingDesc ? (
-            <textarea
-                ref={descTextareaRef}
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                onBlur={handleDescSave}
-                className="w-full h-20 bg-background text-foreground p-1 m-0 border-0 outline-none ring-1 ring-ring rounded resize-none text-xs"
-            />
-        ) : (
-            scene.description || <span className="italic text-foreground/50">Double-click to add description</span>
-        )}
+      
+      {/* Content Area based on Active Lens */}
+      <div className="min-h-[40px]">
+          {activeLens === 'default' && (
+              <div className="p-3 text-xs text-foreground/80 border-b border-border/50" onDoubleClick={() => !isSelectionMode && setIsEditingDesc(true)}>
+                {isEditingDesc ? (
+                    <textarea
+                        ref={descTextareaRef}
+                        value={description}
+                        onChange={e => setDescription(e.target.value)}
+                        onBlur={handleDescSave}
+                        className="w-full h-20 bg-background text-foreground p-1 m-0 border-0 outline-none ring-1 ring-ring rounded resize-none text-xs"
+                    />
+                ) : (
+                    scene.description || <span className="italic text-foreground/50">Double-click to add description</span>
+                )}
+              </div>
+          )}
+          
+          {activeLens === 'background' && (
+               <div className="relative w-full h-32 bg-black/10 group/bg">
+                   {scene.background ? (
+                       <img src={scene.background} alt="bg-preview" className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" />
+                   ) : (
+                       <div className="w-full h-full flex items-center justify-center text-xs text-foreground/40">No Background</div>
+                   )}
+                   
+                   <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/bg:opacity-100 transition-opacity bg-black/40 backdrop-blur-sm p-2">
+                       <select 
+                            className="w-full bg-card/90 text-xs p-1 rounded border-none outline-none"
+                            value={scene.background}
+                            onChange={(e) => handleBackgroundChange(e.target.value)}
+                        >
+                           <option value="">Select Background...</option>
+                           {Object.values(backgrounds).map((bg: BackgroundType) => (
+                               <option key={bg.id} value={bg.url}>{bg.name}</option>
+                           ))}
+                           {scene.background && !Object.values(backgrounds).some((b: BackgroundType) => b.url === scene.background) && (
+                               <option value={scene.background}>Custom URL (Legacy)</option>
+                           )}
+                       </select>
+                   </div>
+               </div>
+          )}
+
+          {activeLens === 'logic' && (
+              <div className="p-3 text-xs">
+                  {/* Incoming Conditions */}
+                  {incomingConditions.length > 0 && (
+                      <div className="mb-2 pb-2 border-b border-border/30">
+                          <div className="font-bold text-foreground/70 mb-1 uppercase text-[10px]">Conditions to Enter</div>
+                          {incomingConditions.map((cond, idx) => (
+                              <div key={idx} className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 px-1.5 py-0.5 rounded mb-1 flex items-center gap-1">
+                                  <span className="font-mono">🔒 {cond}</span>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+                  
+                  {/* Internal Effects */}
+                  <div className="font-bold text-foreground/70 mb-1 uppercase text-[10px]">Effects</div>
+                  {scene.dialogue.filter(d => d.type === 'set_variable').length > 0 ? (
+                      scene.dialogue.filter(d => d.type === 'set_variable').map((item: any, idx) => (
+                          <div key={idx} className="bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded mb-1 font-mono">
+                              {item.variableId} {item.operation === 'set' ? '=' : (item.operation === 'add' ? '+=' : (item.operation === 'subtract' ? '-=' : 'toggle'))} {String(item.value)}
+                          </div>
+                      ))
+                  ) : (
+                      <div className="text-foreground/30 italic">No effects</div>
+                  )}
+              </div>
+          )}
+
+          {activeLens === 'character' && (
+              <div className="p-3">
+                  <div className="flex flex-wrap gap-1 mb-2 min-h-[32px]">
+                      {scene.characters.map((sc, idx) => {
+                          const char = characters[sc.characterId];
+                          return (
+                              <div key={idx} className="w-8 h-8 rounded-full overflow-hidden border border-border bg-secondary" title={char?.name || sc.characterId}>
+                                  {char?.sprites[0]?.url ? (
+                                      <img src={char.sprites[0].url} alt={char.name} className="w-full h-full object-cover" />
+                                  ) : (
+                                      <div className="w-full h-full flex items-center justify-center text-[10px] font-bold">{char?.name?.substring(0,2) || '?'}</div>
+                                  )}
+                              </div>
+                          );
+                      })}
+                      {scene.characters.length === 0 && <span className="text-xs text-foreground/40 italic self-center">No characters</span>}
+                  </div>
+                  <div className="relative group/char">
+                      <button className="w-full text-xs bg-secondary/50 hover:bg-secondary text-secondary-foreground py-1 rounded">
+                          Manage Characters
+                      </button>
+                      <div className="absolute top-full left-0 w-full bg-card border border-border shadow-xl rounded p-2 z-20 hidden group-hover/char:block max-h-48 overflow-y-auto">
+                          {Object.values(characters).map((char: Character) => (
+                              <label key={char.id} className="flex items-center gap-2 p-1 hover:bg-secondary/20 rounded cursor-pointer">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={scene.characters.some(sc => sc.characterId === char.id)}
+                                    onChange={() => handleCharacterToggle(char.id)}
+                                    className="rounded border-border text-primary focus:ring-primary"
+                                  />
+                                  <span className="text-xs truncate">{char.name}</span>
+                              </label>
+                          ))}
+                      </div>
+                  </div>
+              </div>
+          )}
+
+          {activeLens === 'status' && (
+              <div className="p-3 flex flex-col items-center justify-center h-32 gap-2">
+                  <div className={`text-xs font-bold uppercase px-3 py-1 rounded-full border ${
+                      scene.status === 'final' ? 'bg-green-500/20 border-green-500 text-green-600' :
+                      scene.status === 'polished' ? 'bg-blue-500/20 border-blue-500 text-blue-600' :
+                      scene.status === 'written' ? 'bg-yellow-500/20 border-yellow-500 text-yellow-600' :
+                      'bg-gray-500/20 border-gray-500 text-gray-600'
+                  }`}>
+                      {scene.status || 'Draft'}
+                  </div>
+                  <select 
+                    value={scene.status || 'draft'} 
+                    onChange={(e) => handleStatusChange(e.target.value as SceneStatus)}
+                    className="text-xs bg-card border border-border rounded p-1 outline-none focus:ring-1 focus:ring-primary"
+                  >
+                      <option value="draft">Draft</option>
+                      <option value="written">Written</option>
+                      <option value="polished">Polished</option>
+                      <option value="final">Final</option>
+                  </select>
+              </div>
+          )}
       </div>
 
       {/* A single target handle for all incoming connections */}
@@ -248,7 +412,7 @@ const FlowSceneNode: React.FC<{ data: {
             return null;
         })}
 
-        {/* FIX: Add a generic output handle if no connections exist, so new nodes can be connected */}
+        {/* Generic output handle */}
         {outputPortCount === 0 && (
            <div className="relative">
                 <Handle
@@ -272,7 +436,7 @@ const edgeTypes = { default: CustomEdge };
 type SelectionMode = false | 'context' | 'target';
 
 // Main Component
-const NodeEditorView: React.FC<NodeEditorViewProps> = ({ story, scenes, characters, onUpdateScene, onAddScene, onDeleteScene, activeStoryId, onAddSceneStructure }) => {
+const NodeEditorView: React.FC<NodeEditorViewProps> = ({ story, scenes, characters, backgrounds, onUpdateScene, onAddScene, onDeleteScene, activeStoryId, onAddSceneStructure }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   
@@ -281,13 +445,20 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ story, scenes, characte
   const [contextIds, setContextIds] = useState<string[]>([]);
   const [targetId, setTargetId] = useState<string | null>(null);
   const [isStructureModalOpen, setIsStructureModalOpen] = useState(false);
+  
+  // Lens State
+  const [activeLens, setActiveLens] = useState<LensMode>('default');
 
 
   const scenesRef = useRef(scenes);
+  const backgroundsRef = useRef(backgrounds); 
+  const charactersRef = useRef(characters);
   const onUpdateSceneRef = useRef(onUpdateScene);
   const edgesRef = useRef(edges);
 
   useEffect(() => { scenesRef.current = scenes; }, [scenes]);
+  useEffect(() => { backgroundsRef.current = backgrounds; }, [backgrounds]);
+  useEffect(() => { charactersRef.current = characters; }, [characters]);
   useEffect(() => { onUpdateSceneRef.current = onUpdateScene; }, [onUpdateScene]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
   
@@ -297,6 +468,26 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ story, scenes, characte
       setSelectionMode(false); // This will trigger the modal to open
     }
   }, [targetId]);
+  
+  // Calculate incoming logic conditions map
+  const incomingConditionsMap = useMemo(() => {
+      const map: Record<string, string[]> = {};
+      Object.values(scenes).forEach((sourceScene: Scene) => {
+        sourceScene.dialogue.forEach(item => {
+            if (item.type === 'choice') {
+                item.choices.forEach(choice => {
+                    if (choice.nextSceneId && choice.conditions && choice.conditions.length > 0) {
+                        if (!map[choice.nextSceneId]) map[choice.nextSceneId] = [];
+                        const condStrings = choice.conditions.map(c => `${c.variableId} ${c.operator} ${c.value}`);
+                        map[choice.nextSceneId].push(...condStrings);
+                    }
+                });
+            }
+        });
+    });
+    return map;
+  }, [scenes]);
+
 
   const onDeleteEdge = useCallback((edgeId: string) => {
     const currentEdges = edgesRef.current;
@@ -382,10 +573,14 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ story, scenes, characte
       position: scene.position || { x: 50, y: 50 },
       data: { 
         scene, 
+        characters,
+        backgrounds, 
+        incomingConditions: incomingConditionsMap[scene.id] || [],
         onUpdateScene, 
         onDeleteScene,
         isSelectionMode: !!selectionMode,
         selectionState: contextIds.includes(scene.id) ? 'context' : (targetId === scene.id ? 'target' : 'none'),
+        activeLens, 
         onNodeClick: handleNodeClick,
        },
     }));
@@ -426,7 +621,7 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ story, scenes, characte
     });
     setNodes(newNodes);
     setEdges(newEdges);
-  }, [scenes, onUpdateScene, onDeleteScene, onDeleteEdge, selectionMode, contextIds, targetId]);
+  }, [scenes, characters, backgrounds, incomingConditionsMap, onUpdateScene, onDeleteScene, onDeleteEdge, selectionMode, contextIds, targetId, activeLens]);
   
   const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
     onUpdateScene(node.id, { position: node.position });
@@ -496,26 +691,41 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ story, scenes, characte
 
   return (
     <div className="flex-grow bg-transparent w-full h-full relative">
-       <div className="absolute top-4 left-4 z-10 flex gap-2">
-          <button
-            onClick={handleAddNode}
-            className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-semibold rounded-md shadow-lg hover:bg-secondary/90"
-          >
-            + Add Scene
-          </button>
-           <button
-            onClick={() => setIsStructureModalOpen(true)}
-            className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-lg hover:bg-primary/90 flex items-center gap-2"
-          >
-            <AIIcon className="w-4 h-4" />
-            Generate Structure
-          </button>
-          <button
-            onClick={handleToggleSelectionMode}
-            className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-lg hover:bg-primary/90 flex items-center gap-2"
-          >
-            {selectionMode ? 'Cancel Selection' : <><AIIcon className="w-4 h-4" /> Generate Dialogue</>}
-          </button>
+       <div className="absolute top-4 left-4 z-10 flex flex-col gap-2 items-start">
+          <div className="flex gap-2">
+              <button
+                onClick={handleAddNode}
+                className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-semibold rounded-md shadow-lg hover:bg-secondary/90"
+              >
+                + Add Scene
+              </button>
+               <button
+                onClick={() => setIsStructureModalOpen(true)}
+                className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-lg hover:bg-primary/90 flex items-center gap-2"
+              >
+                <AIIcon className="w-4 h-4" />
+                Generate Structure
+              </button>
+              <button
+                onClick={handleToggleSelectionMode}
+                className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-lg hover:bg-primary/90 flex items-center gap-2"
+              >
+                {selectionMode ? 'Cancel Selection' : <><AIIcon className="w-4 h-4" /> Generate Dialogue</>}
+              </button>
+          </div>
+          
+          {/* Lens Selector */}
+          <div className="bg-card/80 backdrop-blur-md border border-border rounded-md p-1 flex gap-1 shadow-lg">
+              {['default', 'background', 'logic', 'character', 'status'].map(lens => (
+                  <button 
+                    key={lens}
+                    onClick={() => setActiveLens(lens as LensMode)}
+                    className={`px-3 py-1 text-xs rounded transition-colors capitalize ${activeLens === lens ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-secondary/50'}`}
+                  >
+                      {lens === 'default' ? 'Summary' : lens}
+                  </button>
+              ))}
+          </div>
        </div>
        
        {isStructureModalOpen && activeStoryId && (
@@ -523,6 +733,7 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ story, scenes, characte
             isOpen={isStructureModalOpen}
             onClose={() => setIsStructureModalOpen(false)}
             story={story}
+            characters={characters}
             onAddSceneStructure={onAddSceneStructure}
         />
        )}
@@ -536,6 +747,7 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ story, scenes, characte
             contextScenes={contextIds.map(id => scenes[id])}
             targetScene={scenes[targetId]}
             story={story}
+            characters={characters}
             onUpdateScene={onUpdateScene}
         />
        )}

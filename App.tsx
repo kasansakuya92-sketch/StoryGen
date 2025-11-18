@@ -1,3 +1,6 @@
+
+
+
 import React, { useState, useCallback, useEffect } from 'react';
 import GameScreen from './components/GameScreen.tsx';
 import StartScreen from './components/StartScreen.tsx';
@@ -5,6 +8,8 @@ import EndScreen from './components/EndScreen.tsx';
 import ProjectExplorer from './components/ProjectExplorer.tsx';
 import SceneEditor from './components/SceneEditor.tsx';
 import CharacterManager from './components/CharacterManager.tsx';
+import VariableManager from './components/VariableManager.tsx';
+import AssetManager from './components/AssetManager.tsx';
 import Toolbar from './components/Toolbar.tsx';
 import NodeEditorView from './components/NodeEditorView.tsx';
 import DocEditorView from './components/DocEditorView.tsx';
@@ -12,7 +17,7 @@ import AIStoryPlanner from './components/AIStoryPlanner.tsx';
 import ProjectsHub from './components/ProjectsHub.tsx';
 import SettingsScreen from './components/SettingsScreen.tsx';
 import { initialProjectsData, defaultCharacters } from './story.ts';
-import { Scene, ScenesData, CharactersData, ProjectsData, Story, AIGeneratedScene, DialogueItem, SceneCharacter, Project } from './types.ts';
+import { Scene, ScenesData, CharactersData, ProjectsData, Story, AIGeneratedScene, DialogueItem, SceneCharacter, Project, StoryVariable, BackgroundsData } from './types.ts';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext.tsx';
 import { LogProvider } from './contexts/LogContext.tsx';
 
@@ -27,7 +32,30 @@ const AppContent: React.FC = () => {
   const [projects, setProjects] = useState<ProjectsData>(() => {
     try {
       const savedProjects = localStorage.getItem('vn_projects');
-      return savedProjects ? JSON.parse(savedProjects) : initialProjectsData;
+      if (savedProjects) {
+          const parsed = JSON.parse(savedProjects);
+          // Migration Logic
+          Object.values(parsed).forEach((p: any) => {
+              if (!p.characters) {
+                  p.characters = {};
+                  Object.values(p.stories || {}).forEach((s: any) => {
+                      if (s.characters) {
+                          p.characters = { ...p.characters, ...s.characters };
+                          delete s.characters;
+                      }
+                  });
+                  if (Object.keys(p.characters).length === 0) {
+                      p.characters = defaultCharacters;
+                  }
+              }
+              // Backgrounds Migration
+              if (!p.backgrounds) {
+                  p.backgrounds = {};
+              }
+          });
+          return parsed;
+      }
+      return initialProjectsData;
     } catch (error) {
       console.error("Could not parse projects from localStorage", error);
       return initialProjectsData;
@@ -58,6 +86,8 @@ const AppContent: React.FC = () => {
   const [editorMode, setEditorMode] = useState<EditorMode>('FORM');
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   const [isCharManagerOpen, setIsCharManagerOpen] = useState(false);
+  const [isVarManagerOpen, setIsVarManagerOpen] = useState(false);
+  const [isAssetManagerOpen, setIsAssetManagerOpen] = useState(false);
   const [isPlannerOpen, setIsPlannerOpen] = useState(false);
   const [isExplorerCollapsed, setIsExplorerCollapsed] = useState(false);
 
@@ -65,7 +95,8 @@ const AppContent: React.FC = () => {
   const activeProject = activeProjectId ? projects[activeProjectId] : null;
   const activeStory = activeProject && activeStoryId ? activeProject.stories[activeStoryId] : null;
   const activeScenes = activeStory?.scenes || null;
-  const activeCharacters = activeStory?.characters || null;
+  const activeCharacters = activeProject?.characters || null;
+  const activeBackgrounds = activeProject?.backgrounds || {};
   
   // EFFECT: Apply theme
   useEffect(() => {
@@ -156,14 +187,34 @@ const AppContent: React.FC = () => {
   const handleEnd = useCallback(() => setGameState('end'), []);
   const handleRestart = useCallback(() => setGameState('start'), []);
 
-  const handleNavigate = useCallback((nextSceneId: string) => {
+  const handleNavigate = useCallback((nextSceneId: string, nextStoryId?: string) => {
+    // Handle inter-story transfer
+    if (nextStoryId && nextStoryId !== activeStoryId) {
+        if (activeProject && activeProject.stories[nextStoryId]) {
+            setActiveStoryId(nextStoryId);
+            // We need to check if the scene exists in the new story
+            const newStory = activeProject.stories[nextStoryId];
+            if (newStory.scenes[nextSceneId]) {
+                setCurrentSceneId(nextSceneId);
+            } else {
+                // Fallback to start scene of new story if target scene doesn't exist
+                console.warn(`Scene ${nextSceneId} not found in story ${nextStoryId}. Defaulting to start scene.`);
+                setCurrentSceneId(newStory.startSceneId);
+            }
+        } else {
+            console.error(`Story ${nextStoryId} not found.`);
+        }
+        return;
+    }
+
+    // Handle intra-story navigation
     if (activeScenes && activeScenes[nextSceneId]) {
       setCurrentSceneId(nextSceneId);
     } else {
       console.error(`Scene with id "${nextSceneId}" not found.`);
       setGameState('end');
     }
-  }, [activeScenes]);
+  }, [activeScenes, activeStoryId, activeProject]);
 
   // Project/Story Selection Handlers
   const handleSelectProject = (id: string) => {
@@ -236,19 +287,18 @@ const AppContent: React.FC = () => {
       const project = projects[projectId];
       if (!project) return;
       
-      // If there's an existing story, inherit its characters. Otherwise, use defaults.
-      // This prevents the first story in a new project from being empty.
-      const firstStory = Object.values(project.stories)[0];
-      const initialCharacters = firstStory ? firstStory.characters : defaultCharacters;
+      // Inherit variables from another story if possible, to keep game logic consistent
+      const firstStory = Object.values(project.stories)[0] as Story | undefined;
+      const initialVariables = firstStory ? firstStory.variables : {};
 
       const newStory: Story = {
           id: newId,
           name: 'New Story',
-          characters: initialCharacters,
-          startSceneId: 'start',
           scenes: {
               'start': { id: 'start', name: 'Start Scene', background: '', characters: [], dialogue: [{type: 'end_story'}], position: {x: 100, y: 100}}
           },
+          startSceneId: 'start',
+          variables: initialVariables
       };
       setProjects(prev => {
           const project = prev[projectId];
@@ -266,6 +316,8 @@ const AppContent: React.FC = () => {
     const newProject = {
         id: newId,
         name: 'New Project',
+        characters: defaultCharacters,
+        backgrounds: {},
         stories: {}
     };
     setProjects(prev => ({
@@ -279,44 +331,40 @@ const AppContent: React.FC = () => {
     const newProjectId = `proj_${Date.now()}`;
     const newStoryId = `story_${Date.now()}`;
     
-    // Create a default story with default characters
     const defaultStory: Story = {
         id: newStoryId,
         name: 'My First Story',
-        characters: defaultCharacters,
         startSceneId: 'start',
         scenes: {
             'start': { id: 'start', name: 'Start Scene', background: '', characters: [], dialogue: [{type: 'end_story'}], position: {x: 100, y: 100}}
         },
+        variables: {}
     };
     
-    // Create the new project with the default story included
     const newProject: Project = {
         id: newProjectId,
         name: 'New Project',
+        characters: defaultCharacters,
+        backgrounds: {},
         stories: { [newStoryId]: defaultStory }
     };
     
-    // Update state once with the new project
     setProjects(prev => ({
         ...prev,
         [newProjectId]: newProject
     }));
     
-    // Navigate to the editor for the new project
     handleOpenEditor(newProjectId);
   };
 
 
   const handleDeleteProject = (projectId: string) => {
-    // The confirmation is handled in the UI component, here we just process the deletion.
     setProjects(prev => {
       const newProjects = { ...prev };
       delete newProjects[projectId];
       return newProjects;
     });
 
-    // If the deleted project was the active one, clear active IDs.
     if (activeProjectId === projectId) {
       setActiveProjectId(null);
       setActiveStoryId(null);
@@ -399,14 +447,12 @@ const AppContent: React.FC = () => {
         const newScenes = { ...story.scenes };
         delete newScenes[sceneId];
 
-        // Also need to update any transitions/choices pointing to this scene
         Object.values(newScenes).forEach((scene: Scene) => {
             scene.dialogue.forEach(item => {
                 if (item.type === 'transition' && item.nextSceneId === sceneId) {
-                    item.nextSceneId = ''; // Or point to start scene? Clearing is safer.
+                    item.nextSceneId = ''; 
                 }
                 if (item.type === 'choice') {
-                    // FIX: Add safety checks to prevent crashes from malformed choice data.
                     (item.choices || []).forEach(choice => {
                         if (choice.nextSceneId === sceneId) {
                             choice.nextSceneId = '';
@@ -418,7 +464,6 @@ const AppContent: React.FC = () => {
         
         let newStory = { ...story, scenes: newScenes };
         
-        // If the deleted scene was the start scene, pick a new one
         if (story.startSceneId === sceneId) {
             newStory.startSceneId = Object.keys(newScenes)[0] || '';
         }
@@ -446,7 +491,6 @@ const AppContent: React.FC = () => {
         return { ...prev, [projectId]: newProject };
     });
 
-    // If the active story was deleted, reset it
     if (storyId === activeStoryId) {
         const project = projects[projectId];
         const remainingStoryIds = Object.keys(project.stories).filter(id => id !== storyId);
@@ -455,40 +499,68 @@ const AppContent: React.FC = () => {
   };
 
   const handleUpdateCharacters = useCallback((updatedCharacters: CharactersData) => {
-      if(!activeProjectId || !activeStoryId) return;
+      if(!activeProjectId) return;
       setProjects(prev => {
           const project = prev[activeProjectId];
           if (!project) return prev;
           
-          const story = project.stories[activeStoryId];
-          if (!story) return prev;
-
-          const newStory = { ...story, characters: updatedCharacters };
-          const newStories = { ...project.stories, [activeStoryId]: newStory };
-          const newProject = { ...project, stories: newStories };
-          
+          const newProject = { ...project, characters: updatedCharacters };
           return { ...prev, [activeProjectId]: newProject };
       });
-  }, [activeProjectId, activeStoryId]);
+  }, [activeProjectId]);
 
-  const handlePlanGenerated = (plan: { name: string, scenes: ScenesData, characters: CharactersData }) => {
-    if (!activeProjectId) return;
-    const newStoryId = `story_${Date.now()}`;
-    const newStory: Story = {
-        id: newStoryId,
-        name: plan.name || "New AI Story",
-        scenes: plan.scenes,
-        characters: plan.characters,
-        startSceneId: Object.keys(plan.scenes)[0] || '',
-    };
+  const handleUpdateBackgrounds = useCallback((updatedBackgrounds: BackgroundsData) => {
+    if(!activeProjectId) return;
     setProjects(prev => {
         const project = prev[activeProjectId];
         if (!project) return prev;
         
+        const newProject = { ...project, backgrounds: updatedBackgrounds };
+        return { ...prev, [activeProjectId]: newProject };
+    });
+  }, [activeProjectId]);
+
+  const handleUpdateVariables = useCallback((updatedVariables: Record<string, StoryVariable>) => {
+    if(!activeProjectId || !activeStoryId) return;
+    setProjects(prev => {
+        const project = prev[activeProjectId];
+        if (!project) return prev;
+        
+        const story = project.stories[activeStoryId];
+        if (!story) return prev;
+
+        const newStory = { ...story, variables: updatedVariables };
+        const newStories = { ...project.stories, [activeStoryId]: newStory };
+        const newProject = { ...project, stories: newStories };
+        
+        return { ...prev, [activeProjectId]: newProject };
+    });
+  }, [activeProjectId, activeStoryId]);
+
+  const handlePlanGenerated = (plan: { name: string, scenes: ScenesData, characters: CharactersData, variables: Record<string, StoryVariable> }) => {
+    if (!activeProjectId) return;
+    const newStoryId = `story_${Date.now()}`;
+    
+    const newStory: Story = {
+        id: newStoryId,
+        name: plan.name || "New AI Story",
+        scenes: plan.scenes,
+        startSceneId: Object.keys(plan.scenes)[0] || '',
+        variables: plan.variables
+    };
+
+    setProjects(prev => {
+        const project = prev[activeProjectId];
+        if (!project) return prev;
+        
+        // Merge generated characters into project characters
+        const mergedCharacters = { ...project.characters, ...plan.characters };
+
         return {
             ...prev,
             [activeProjectId]: {
                 ...project,
+                characters: mergedCharacters,
                 stories: { ...project.stories, [newStoryId]: newStory }
             }
         };
@@ -509,14 +581,12 @@ const AppContent: React.FC = () => {
             const sourceScene = newScenesData[sourceSceneId];
             if (!sourceScene) return prev;
 
-            // 1. Create a map from temporary AI IDs to new permanent IDs
             const tempIdToNewId: Record<string, string> = {};
             generated.scenes.forEach(tempScene => {
                 const newId = `scene_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
                 tempIdToNewId[tempScene.id] = newId;
             });
 
-            // 2. Add the new scenes to the project with permanent IDs and calculated positions
             const sourcePos = sourceScene.position || { x: 0, y: 0 };
             generated.scenes.forEach((tempScene, index) => {
                 const newId = tempIdToNewId[tempScene.id];
@@ -526,19 +596,18 @@ const AppContent: React.FC = () => {
                     description: tempScene.description,
                     background: `https://picsum.photos/seed/bg-${newId}/1920/1080`,
                     characters: tempScene.characterIds
-                        .filter(id => story.characters[id])
+                        .filter(id => project.characters[id])
                         .map((id, charIndex) => ({
                             characterId: id,
                             spriteId: 'normal',
                             position: charIndex === 0 ? 'left' : 'right',
                         } as SceneCharacter)),
-                    dialogue: [...tempScene.dialogue, { type: 'end_story' }], // Add a default end_story
+                    dialogue: [...tempScene.dialogue, { type: 'end_story' }], 
                     position: { x: sourcePos.x + 300 + (index * 50), y: sourcePos.y + (index * 150) - 100 },
                 };
                 newScenesData[newId] = newScene;
             });
             
-            // 3. Update the source scene's dialogue with the new connection
             const sourceConnection = generated.connections.sourceSceneConnection;
             let newSourceOutcome: DialogueItem;
             if (sourceConnection.type === 'transition') {
@@ -546,7 +615,7 @@ const AppContent: React.FC = () => {
                     type: 'transition',
                     nextSceneId: tempIdToNewId[sourceConnection.nextSceneId],
                 };
-            } else { // choice
+            } else { 
                 newSourceOutcome = {
                     type: 'choice',
                     choices: (sourceConnection.choices || []).map((c: any) => ({
@@ -556,7 +625,6 @@ const AppContent: React.FC = () => {
                 };
             }
             
-            // Replace the last dialogue item (which should be an outcome) in the source scene
             const newSourceDialogue = [...sourceScene.dialogue];
             const outcomeIndex = newSourceDialogue.findIndex(d => d.type !== 'text');
             if (outcomeIndex !== -1) {
@@ -567,7 +635,6 @@ const AppContent: React.FC = () => {
             newScenesData[sourceSceneId] = { ...sourceScene, dialogue: newSourceDialogue };
 
 
-            // 4. Apply internal connections to the newly created scenes
             if (generated.connections.internalConnections) {
                 generated.connections.internalConnections.forEach((conn: any) => {
                     const internalSourceId = tempIdToNewId[conn.sourceSceneId];
@@ -582,7 +649,7 @@ const AppContent: React.FC = () => {
                                 type: 'transition',
                                 nextSceneId: tempIdToNewId[conn.outcome.nextSceneId],
                              };
-                        } else { // choice
+                        } else { 
                              internalOutcome = {
                                 type: 'choice',
                                 choices: (conn.outcome.choices || []).map((c: any) => ({
@@ -602,7 +669,6 @@ const AppContent: React.FC = () => {
                 });
             }
 
-            // 5. Update state
             const newStory = { ...story, scenes: newScenesData };
             const newStories = { ...project.stories, [activeStoryId]: newStory };
             const newProject = { ...project, stories: newStories };
@@ -621,7 +687,7 @@ const AppContent: React.FC = () => {
       case 'start':
         return <StartScreen onStart={handleStart} onGoToHub={handleGoToHub}/>;
       case 'playing':
-        return currentScene ? <GameScreen scene={currentScene} characters={activeCharacters} onNavigate={handleNavigate} onEnd={handleEnd} onOpenEditor={handleOpenEditorFromGame}/> : <EndScreen onRestart={handleRestart} onGoToHub={handleGoToHub} />;
+        return currentScene ? <GameScreen scene={currentScene} story={activeStory} characters={activeCharacters} onNavigate={handleNavigate} onEnd={handleEnd} onOpenEditor={handleOpenEditorFromGame}/> : <EndScreen onRestart={handleRestart} onGoToHub={handleGoToHub} />;
       case 'end':
         return <EndScreen onRestart={handleRestart} onGoToHub={handleGoToHub} />;
       default:
@@ -642,6 +708,8 @@ const AppContent: React.FC = () => {
       <Toolbar
         activeProject={activeProject}
         onToggleCharManager={() => setIsCharManagerOpen(true)}
+        onToggleVarManager={() => setIsVarManagerOpen(true)}
+        onToggleAssetManager={() => setIsAssetManagerOpen(true)}
         editorMode={editorMode}
         onToggleEditorMode={handleToggleEditorMode}
         onOpenStoryPlanner={() => setIsPlannerOpen(true)}
@@ -675,6 +743,7 @@ const AppContent: React.FC = () => {
                 key={selectedSceneId}
                 scene={selectedSceneForEditor}
                 story={activeStory}
+                project={activeProject}
                 scenes={activeScenes}
                 characters={activeCharacters}
                 onUpdateScene={handleUpdateScene}
@@ -685,6 +754,7 @@ const AppContent: React.FC = () => {
                 story={activeStory}
                 scenes={activeScenes}
                 characters={activeCharacters}
+                backgrounds={activeBackgrounds}
                 onUpdateScene={handleUpdateScene}
                 activeStoryId={activeStoryId}
                 onAddScene={handleAddScene}
@@ -710,6 +780,20 @@ const AppContent: React.FC = () => {
           characters={activeCharacters}
           onUpdateCharacters={handleUpdateCharacters}
           onClose={() => setIsCharManagerOpen(false)}
+        />
+      )}
+      {isVarManagerOpen && activeStory && (
+        <VariableManager
+          variables={activeStory.variables || {}}
+          onUpdateVariables={handleUpdateVariables}
+          onClose={() => setIsVarManagerOpen(false)}
+        />
+      )}
+      {isAssetManagerOpen && activeBackgrounds && (
+        <AssetManager
+            backgrounds={activeBackgrounds}
+            onUpdateBackgrounds={handleUpdateBackgrounds}
+            onClose={() => setIsAssetManagerOpen(false)}
         />
       )}
       {isPlannerOpen && activeProject && (

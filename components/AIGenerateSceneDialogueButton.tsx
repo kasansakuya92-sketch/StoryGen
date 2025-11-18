@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Scene, ScenesData, CharactersData, DialogueLength, DialogueItem, Story } from '../types.ts';
 import { generateDialogueForScene } from '../utils/ai.ts';
@@ -11,9 +12,10 @@ interface AIGenerateSceneDialogueButtonProps {
   dialogueLength: DialogueLength;
   useContinuity: boolean;
   aiPrompt: string;
+  characters: CharactersData; // Added
 }
 
-const AIGenerateSceneDialogueButton: React.FC<AIGenerateSceneDialogueButtonProps> = ({ scene, story, onUpdateScene, dialogueLength, useContinuity, aiPrompt }) => {
+const AIGenerateSceneDialogueButton: React.FC<AIGenerateSceneDialogueButtonProps> = ({ scene, story, onUpdateScene, dialogueLength, useContinuity, aiPrompt, characters }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { settings } = useSettings();
@@ -23,7 +25,7 @@ const AIGenerateSceneDialogueButton: React.FC<AIGenerateSceneDialogueButtonProps
     setError(null);
     try {
       // We only want to generate text lines to extend the dialogue, not create a new outcome.
-      const newDialogueItems = await generateDialogueForScene(settings, story, scene.id, dialogueLength, useContinuity, 'text_only', aiPrompt);
+      const newDialogueItems = await generateDialogueForScene(settings, story, scene.id, characters, dialogueLength, useContinuity, 'text_only', aiPrompt);
       
       if (Array.isArray(newDialogueItems)) {
          // Find if an outcome block already exists and preserve it.

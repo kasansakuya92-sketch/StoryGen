@@ -1,3 +1,7 @@
+
+
+
+
 // types.ts
 
 export interface Sprite {
@@ -18,6 +22,16 @@ export interface CharactersData {
   [key:string]: Character;
 }
 
+export interface Background {
+  id: string;
+  name: string;
+  url: string;
+}
+
+export interface BackgroundsData {
+  [key: string]: Background;
+}
+
 export interface SceneCharacter {
   characterId: string;
   spriteId: string;
@@ -31,9 +45,19 @@ export interface TextLine {
   text: string;
 }
 
+export type ConditionOperator = 'eq' | 'neq' | 'gt' | 'lt' | 'gte' | 'lte';
+
+export interface Condition {
+  variableId: string;
+  operator: ConditionOperator;
+  value: any;
+}
+
 export interface Choice {
   text: string;
   nextSceneId: string;
+  nextStoryId?: string; // Optional: if present, switch story
+  conditions?: Condition[];
 }
 
 export interface ChoiceLine {
@@ -44,6 +68,7 @@ export interface ChoiceLine {
 export interface Transition {
   type: 'transition';
   nextSceneId: string;
+  nextStoryId?: string; // Optional: if present, switch story
 }
 
 export interface EndStory {
@@ -73,8 +98,18 @@ export interface AIPromptLine {
   error?: string | null;
 }
 
-export type DialogueItem = TextLine | ChoiceLine | Transition | EndStory | AIPromptLine | ImageLine | VideoLine;
+export type VariableOperation = 'set' | 'add' | 'subtract' | 'toggle';
 
+export interface SetVariableLine {
+  type: 'set_variable';
+  variableId: string;
+  operation: VariableOperation;
+  value?: any;
+}
+
+export type DialogueItem = TextLine | ChoiceLine | Transition | EndStory | AIPromptLine | ImageLine | VideoLine | SetVariableLine;
+
+export type SceneStatus = 'draft' | 'written' | 'polished' | 'final';
 
 // Updates to existing types
 export interface Scene {
@@ -85,28 +120,39 @@ export interface Scene {
   characters: SceneCharacter[];
   dialogue: DialogueItem[];
   position?: { x: number; y: number }; // For node editor
-  // FIX: Add properties for context engine
   importance?: NodeImportanceFactors;
   isCheckpoint?: boolean;
+  status?: SceneStatus;
 }
 
 export interface ScenesData {
   [key: string]: Scene;
 }
 
+export type VariableType = 'boolean' | 'number' | 'string';
+
+export interface StoryVariable {
+  id: string;
+  name: string;
+  type: VariableType;
+  initialValue: any;
+}
+
 export interface Story {
     id: string;
     name: string;
-    characters: CharactersData;
+    // characters: CharactersData; // Moved to Project
     scenes: ScenesData;
     startSceneId: string;
-    // FIX: Add property for context engine
+    variables: Record<string, StoryVariable>;
     checkpointSummaries?: Record<string, { text: string; tokens: number }>;
 }
 
 export interface Project {
     id: string;
     name: string;
+    characters: CharactersData; // Added to Project
+    backgrounds: BackgroundsData; // Added Backgrounds registry
     stories: {
         [storyId: string]: Story;
     };

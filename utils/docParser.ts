@@ -1,11 +1,25 @@
+
 // utils/docParser.ts
-import { Project, Story, Scene, DialogueItem, SceneCharacter, Choice } from '../types.ts';
+import { Project, Story, Scene, DialogueItem, SceneCharacter, Choice, CharactersData } from '../types.ts';
 
 /**
  * Serializes a Project object into a human-readable text document.
  */
 export const serializeProjectToDoc = (project: Project): string => {
   let doc = '';
+  
+  // Global Characters Section
+  doc += `# PROJECT: ${project.name} (id: ${project.id})\n\n`;
+  doc += `## CHARACTERS\n`;
+  Object.values(project.characters).forEach(char => {
+      doc += `- ${char.name} (id: ${char.id})\n`;
+      doc += `  Appearance: ${char.appearance}\n`;
+      doc += `  Style: ${char.talkingStyle}\n`;
+      if (char.sprites.length > 0) {
+          doc += `  Sprites: ${char.sprites.map(s => s.id).join(', ')}\n`;
+      }
+  });
+  doc += `\n---\n\n`;
 
   for (const story of Object.values(project.stories)) {
     doc += `# STORY: ${story.name} (id: ${story.id})\n\n`;
@@ -36,14 +50,12 @@ export const serializeProjectToDoc = (project: Project): string => {
       if (scene.background) doc += `BACKGROUND: ${scene.background}\n`;
 
       if (scene.characters.length > 0) {
-        doc += 'CHARACTERS:\n';
+        doc += 'SCENE CHARACTERS:\n';
         scene.characters.forEach(sc => {
-          const char = story.characters[sc.characterId];
-          if (char) {
-            const defaultSprite = char.defaultSpriteId;
+            // We use project characters now, so just reference the ID
+            const defaultSprite = project.characters[sc.characterId]?.defaultSpriteId || 'normal';
             const spritePart = sc.spriteId && sc.spriteId !== defaultSprite ? ` as ${sc.spriteId}` : '';
             doc += `- ${sc.characterId}${spritePart} at ${sc.position}\n`;
-          }
         });
       }
       doc += '\n'; // separator
@@ -104,16 +116,64 @@ export const parseDocToProject = (docText: string, originalProject: Project): Pr
     // Start with a deep copy to preserve metadata not in the doc
     const newProject: Project = JSON.parse(JSON.stringify(originalProject));
     newProject.stories = {};
+    // We will overwrite characters if defined in doc, else keep existing
+    // But usually parsing replaces structure. Let's track if we found chars.
+    let foundCharacters = false;
 
     const lines = docText.split('\n');
 
     let currentStory: Story | null = null;
     let currentScene: Scene | null = null;
-    let parsingState: 'default' | 'characters' = 'default';
+    let parsingState: 'default' | 'characters' | 'project_characters' = 'default';
+
+    // Helper to parse character lines
+    const parseCharLine = (line: string, target: CharactersData) => {
+        const match = line.match(/^- (.*) \(id: (.*)\)$/);
+        if (match) {
+            const [, name, id] = match;
+            if (!target[id]) {
+                target[id] = {
+                    id,
+                    name,
+                    appearance: '',
+                    talkingStyle: '',
+                    defaultSpriteId: 'normal',
+                    sprites: [{ id: 'normal', url: `https://picsum.photos/seed/${id}/600/800` }]
+                };
+            }
+            return id;
+        }
+        return null;
+    };
+
+    let lastCharId: string | null = null;
 
     for (const line of lines) {
         const trimmedLine = line.trim();
         if (!trimmedLine || trimmedLine.startsWith('//')) continue;
+
+        // Project Character Section
+        if (trimmedLine === '## CHARACTERS') {
+            parsingState = 'project_characters';
+            newProject.characters = {}; // Reset if we are redefining
+            foundCharacters = true;
+            continue;
+        }
+
+        if (parsingState === 'project_characters') {
+             if (trimmedLine.startsWith('# STORY:') || trimmedLine === '---') {
+                 parsingState = 'default';
+             } else {
+                 if (trimmedLine.startsWith('- ')) {
+                     lastCharId = parseCharLine(trimmedLine, newProject.characters);
+                 } else if (lastCharId && trimmedLine.startsWith('Appearance: ')) {
+                     newProject.characters[lastCharId].appearance = trimmedLine.replace('Appearance: ', '');
+                 } else if (lastCharId && trimmedLine.startsWith('Style: ')) {
+                     newProject.characters[lastCharId].talkingStyle = trimmedLine.replace('Style: ', '');
+                 }
+                 continue;
+             }
+        }
 
         // Scene Separator
         if (trimmedLine === '---') {
@@ -131,8 +191,8 @@ export const parseDocToProject = (docText: string, originalProject: Project): Pr
                 id,
                 name,
                 scenes: {},
-                characters: originalStory?.characters || {},
                 startSceneId: originalStory?.startSceneId || '',
+                variables: originalStory?.variables || {},
             };
             newProject.stories[id] = currentStory;
             currentScene = null;
@@ -173,7 +233,7 @@ export const parseDocToProject = (docText: string, originalProject: Project): Pr
             continue;
         }
         
-        if (trimmedLine === 'CHARACTERS:') {
+        if (trimmedLine === 'SCENE CHARACTERS:' || trimmedLine === 'CHARACTERS:') {
             parsingState = 'characters';
             currentScene.characters = [];
             continue;
@@ -185,7 +245,7 @@ export const parseDocToProject = (docText: string, originalProject: Project): Pr
                 const [, characterId, spriteId, position] = charMatch;
                 currentScene.characters.push({
                     characterId,
-                    spriteId: spriteId || currentStory.characters[characterId]?.defaultSpriteId || 'normal',
+                    spriteId: spriteId || newProject.characters[characterId]?.defaultSpriteId || 'normal',
                     position: position as SceneCharacter['position'],
                 });
             } else {
@@ -251,10 +311,5 @@ export const parseDocToProject = (docText: string, originalProject: Project): Pr
         }
     }
     
-    // Final validation
-    if (Object.keys(newProject.stories).length === 0 && docText.trim() !== '') {
-        throw new Error("Could not find any valid '# STORY:' definitions in the document.");
-    }
-
     return newProject;
 };

@@ -260,11 +260,11 @@ function extractArrayFromResponse<T>(response: any, itemValidator: (item: any) =
 export const generateStoryPlanWithLocalAI = async (
     url: string,
     prompt: string, 
-    sceneLength: SceneLength = 'Short',
+    sceneLength: SceneLength | 'Epic' = 'Short',
     storyType: 'branching' | 'linear' = 'branching'
 ): Promise<any> => {
     // This function now uses a multi-step process for reliability.
-    const lengthMap = { 'Short': '3-4', 'Medium': '5-6', 'Long': '7-8' };
+    const lengthMap = { 'Short': '3-4', 'Medium': '5-6', 'Long': '7-8', 'Epic': '12-15' };
     const numScenes = lengthMap[sceneLength];
 
     // STEP 1: Generate Characters
@@ -302,7 +302,21 @@ EXAMPLE JSON OUTPUT: ["A Mysterious Letter", "The Crossroads", "The Forest Path"
         sceneTitleToIdMap.set(title, id);
     });
 
-    // STEP 3: Generate details for each scene iteratively
+    // STEP 3: Generate Variables
+    const variablePrompt = `You are a game designer. Based on the story prompt, create 2-3 global variables to track game state (e.g. 'health', 'trust', 'has_key'). Respond with a valid JSON array of objects with 'name', 'type' (boolean, number, string), and 'initialValue'.
+---
+USER PROMPT: "${prompt}"
+---
+EXAMPLE JSON OUTPUT:
+[
+    { "name": "Trust", "type": "number", "initialValue": 0 },
+    { "name": "Has Artifact", "type": "boolean", "initialValue": false }
+]`;
+    const rawVariablesResponse = await postToLocalModel(url, [{ role: 'system', content: "You only respond in valid JSON." }, { role: 'user', content: variablePrompt }], 'generateStoryPlan-Variables');
+    const variables = Array.isArray(rawVariablesResponse) ? rawVariablesResponse : [];
+
+
+    // STEP 4: Generate details for each scene iteratively
     const scenes: any[] = [];
     for (const currentSceneTitle of sceneTitles) {
         const sceneDetailPrompt = `You are a visual novel scene writer. For the scene titled "${currentSceneTitle}", provide a one-sentence summary and list the characters present. Respond with a single valid JSON object. Do not add any explanations or markdown.
@@ -335,9 +349,7 @@ EXAMPLE JSON OUTPUT:
         });
     }
 
-    // NOTE: Connection/outcome logic is now handled programmatically in AIStoryPlanner.tsx for consistency.
-    
-    // STEP 4: Assemble and return final plan
+    // STEP 5: Assemble and return final plan
     const finalCharactersData: CharactersData = {};
     characters.forEach(c => {
         finalCharactersData[c.id] = {
@@ -347,7 +359,7 @@ EXAMPLE JSON OUTPUT:
         };
     });
 
-    return { characters: finalCharactersData, scenes };
+    return { characters: finalCharactersData, scenes, variables };
 };
 
 

@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Scene, CharactersData, ScenesData, DialogueLength, TextLine, Story } from '../types.ts';
 import { generateDialogueFromNodes } from '../utils/ai.ts';
@@ -27,6 +28,42 @@ const AIGenerationModal: React.FC<AIGenerationModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const { settings } = useSettings();
 
+  // NOTE: We are missing explicit 'characters' prop here because NodeEditorView doesn't pass it into this modal
+  // However, since we did a project refactor, characters should be available.
+  // For now, assuming the parent view will be updated to pass characters or we can't access them.
+  // Wait, we can't access 'characters' from 'story' anymore.
+  // I need to update the props of this component too. But let's check NodeEditorView.
+  
+  // Actually, AIGenerationModal is called from NodeEditorView which HAS characters.
+  // I will update NodeEditorView to pass characters to this modal.
+  
+  // For this file update, I'll assume the prop is passed.
+  // But I can't change the interface without updating the caller.
+  // Let's check if I can access characters another way? No.
+  
+  // I'll skip updating this file in this XML block and include it in the NodeEditorView update block or 
+  // update it here assuming I'll update the caller.
+  
+  // Let's stick to the plan. I will update this file to accept characters.
+  return null; 
+} 
+// ... Actually I will rewrite this entire file content to be safe.
+
+const AIGenerationModalReal: React.FC<AIGenerationModalProps & { characters: CharactersData }> = ({
+  isOpen,
+  onClose,
+  contextScenes,
+  targetScene,
+  story,
+  characters,
+  onUpdateScene,
+}) => {
+  const [prompt, setPrompt] = useState('');
+  const [dialogueLength, setDialogueLength] = useState<DialogueLength>('Medium');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { settings } = useSettings();
+
   const handleGenerate = async () => {
     if (!targetScene) return;
 
@@ -38,6 +75,7 @@ const AIGenerationModal: React.FC<AIGenerationModalProps> = ({
         story,
         contextScenes.map(s => s.id),
         targetScene.id,
+        characters,
         prompt,
         dialogueLength
       );
@@ -120,4 +158,4 @@ const AIGenerationModal: React.FC<AIGenerationModalProps> = ({
   );
 };
 
-export default AIGenerationModal;
+export default AIGenerationModalReal;

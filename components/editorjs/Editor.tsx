@@ -1,6 +1,9 @@
+
+
+
 import React, { useRef, useEffect, useMemo } from 'react';
-import { DialogueItem, Scene, ScenesData, CharactersData, Settings, TextLine, ChoiceLine, Transition, EndStory, AIPromptLine, ImageLine, VideoLine, Character, Story } from '../../types.ts';
-import { TextTool, ChoiceTool, TransitionTool, EndStoryTool, AIPromptTool, ImageTool, VideoTool } from './tools.ts';
+import { DialogueItem, Scene, ScenesData, CharactersData, Settings, TextLine, ChoiceLine, Transition, EndStory, AIPromptLine, ImageLine, VideoLine, Character, Story, Project } from '../../types.ts';
+import { TextTool, ChoiceTool, TransitionTool, EndStoryTool, AIPromptTool, ImageTool, VideoTool, SetVariableTool } from './tools.ts';
 import { generateDialogueForScene } from '../../utils/ai.ts';
 
 // Make EditorJS globally available for TS
@@ -9,6 +12,7 @@ declare const EditorJS: any;
 interface DialogueEditorProps {
   scene: Scene;
   story: Story;
+  project: Project; // Added project prop
   scenes: ScenesData;
   characters: CharactersData;
   onUpdateDialogue: (dialogue: DialogueItem[]) => void;
@@ -24,7 +28,7 @@ const toEditorJSData = (dialogue: DialogueItem[]) => {
             case 'choice':
                 return { type: 'choice', data: { choices: item.choices } };
             case 'transition':
-                return { type: 'transition', data: { nextSceneId: item.nextSceneId } };
+                return { type: 'transition', data: { nextSceneId: item.nextSceneId, nextStoryId: item.nextStoryId } };
             case 'end_story':
                 return { type: 'endStory', data: {} };
             case 'ai_prompt':
@@ -33,6 +37,8 @@ const toEditorJSData = (dialogue: DialogueItem[]) => {
                 return { type: 'image', data: { url: item.url } };
             case 'video':
                 return { type: 'video', data: { url: item.url } };
+            case 'set_variable':
+                return { type: 'setVariable', data: { variableId: item.variableId, operation: item.operation, value: item.value } };
             default:
                 return null;
         }
@@ -53,7 +59,7 @@ const fromEditorJSData = (editorData: any): DialogueItem[] => {
             case 'choice':
                 return { type: 'choice', choices: block.data.choices || [] };
             case 'transition':
-                return { type: 'transition', nextSceneId: block.data.nextSceneId || '' };
+                return { type: 'transition', nextSceneId: block.data.nextSceneId || '', nextStoryId: block.data.nextStoryId || undefined };
             case 'endStory':
                 return { type: 'end_story' };
             case 'aiPrompt':
@@ -62,13 +68,15 @@ const fromEditorJSData = (editorData: any): DialogueItem[] => {
                 return { type: 'image', url: block.data.url || '' };
             case 'video':
                 return { type: 'video', url: block.data.url || '' };
+            case 'setVariable':
+                return { type: 'set_variable', ...block.data };
             default:
                 return null;
         }
     }).filter((item: DialogueItem | null): item is DialogueItem => item !== null);
 };
 
-const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, scenes, characters, onUpdateDialogue, settings }) => {
+const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, project, scenes, characters, onUpdateDialogue, settings }) => {
     const editorInstance = useRef<any>(null);
     const holderId = `editorjs-holder-${scene.id}`;
 
@@ -82,6 +90,10 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, scenes, c
     const sceneDeps = useMemo(() => {
         return Object.values(scenes).map((s: Scene) => `${s.id}:${s.name}`).sort().join(',');
     }, [scenes]);
+
+    const variableDeps = useMemo(() => {
+        return story.variables ? Object.keys(story.variables).sort().join(',') : '';
+    }, [story.variables]);
 
     useEffect(() => {
         // Destroy the previous instance if it exists. This is crucial for re-initializing
@@ -109,7 +121,8 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, scenes, c
                 };
 
                 // The AI Prompt tool now only generates text to continue the scene.
-                const newItems = await generateDialogueForScene(settings, currentStoryState, scene.id, config.dialogueLength, config.useContinuity, 'text_only', config.aiPrompt);
+                // Pass characters separately now
+                const newItems = await generateDialogueForScene(settings, currentStoryState, scene.id, characters, config.dialogueLength, config.useContinuity, 'text_only', config.aiPrompt);
                 
                 const newEditorBlocks = toEditorJSData(newItems).blocks;
                 
@@ -139,11 +152,15 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, scenes, c
                 },
                 choice: {
                     class: ChoiceTool,
-                    config: { scenes },
+                    config: { scenes, variables: story.variables, project, currentStoryId: story.id },
+                },
+                setVariable: {
+                    class: SetVariableTool,
+                    config: { variables: story.variables }
                 },
                 transition: {
                     class: TransitionTool,
-                    config: { scenes },
+                    config: { scenes, project, currentStoryId: story.id },
                 },
                 endStory: EndStoryTool,
                 image: ImageTool,
@@ -173,7 +190,7 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, scenes, c
     // This dependency array ensures the editor re-initializes ONLY if the character or scene
     // lists are updated (e.g., via Character Manager), not on every dialogue change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [characterDeps, sceneDeps, settings, onUpdateDialogue, holderId, story]);
+    }, [characterDeps, sceneDeps, variableDeps, settings, onUpdateDialogue, holderId, story]);
 
     return <div id={holderId} className="prose text-foreground" />;
 };

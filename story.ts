@@ -1,3 +1,4 @@
+
 // story.ts
 import { ProjectsData, ScenesData, CharactersData } from './types.ts';
 
@@ -98,13 +99,18 @@ export const initialProjectsData: ProjectsData = {
     'proj_1': {
         id: 'proj_1',
         name: 'My First Project',
+        characters: defaultCharacters,
+        backgrounds: {},
         stories: {
             'story_1': {
                 id: 'story_1',
                 name: 'A Simple Adventure',
-                characters: defaultCharacters,
                 startSceneId: 'start',
                 scenes: scenes,
+                variables: {
+                  'has_sword': { id: 'has_sword', name: 'Has Sword', type: 'boolean', initialValue: false },
+                  'gold': { id: 'gold', name: 'Gold', type: 'number', initialValue: 10 },
+                }
             }
         }
     }

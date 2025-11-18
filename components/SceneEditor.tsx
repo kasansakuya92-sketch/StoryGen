@@ -1,5 +1,8 @@
+
+
+
 import React, { useCallback, useState } from 'react';
-import { Scene, ScenesData, CharactersData, DialogueItem, DialogueLength, Story } from '../types.ts';
+import { Scene, ScenesData, CharactersData, DialogueItem, DialogueLength, Story, Project } from '../types.ts';
 import DialogueEditor from './editorjs/Editor.tsx';
 import { useSettings } from '../contexts/SettingsContext.tsx';
 import AIGenerateSceneDialogueButton from './AIGenerateSceneDialogueButton.tsx';
@@ -12,11 +15,12 @@ interface SceneEditorProps {
   scenes: ScenesData;
   characters: CharactersData;
   onUpdateScene: (sceneId: string, updatedScene: Partial<Scene>) => void;
+  project: Project; // Added Project to allow cross-story linking
 }
 
 const commonFormElement = "w-full bg-card/70 border border-border rounded-md p-2 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none";
 
-const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, characters, onUpdateScene }) => {
+const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, characters, onUpdateScene, project }) => {
   const { settings } = useSettings();
   
   const [isAiDialoguePanelOpen, setIsAiDialoguePanelOpen] = useState(false);
@@ -58,6 +62,7 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, charact
                 key={scene.id}
                 scene={scene}
                 story={story}
+                project={project}
                 scenes={scenes}
                 characters={characters}
                 onUpdateDialogue={handleDialogueUpdate}
@@ -123,6 +128,7 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, charact
                 <AIGenerateSceneDialogueButton
                 scene={scene}
                 story={story}
+                characters={characters}
                 onUpdateScene={onUpdateScene}
                 dialogueLength={aiDialogueLength}
                 useContinuity={aiUseContinuity}

@@ -1,21 +1,39 @@
+
+
+
 import React, { useState, useCallback, useEffect } from 'react';
-import { Scene, DialogueItem, SceneCharacter, CharactersData } from '../types.ts';
+import { Scene, DialogueItem, SceneCharacter, CharactersData, Story, Condition, StoryVariable } from '../types.ts';
 import CharacterSprite from './CharacterSprite.tsx';
 import DialogueBox from './DialogueBox.tsx';
 import ChoiceButtons from './ChoiceButtons.tsx';
 
 interface GameScreenProps {
   scene: Scene;
-  characters: CharactersData;
-  onNavigate: (nextSceneId: string) => void;
+  story: Story; // Need full story for variables
+  characters: CharactersData; // Characters passed explicitly from project
+  onNavigate: (nextSceneId: string, nextStoryId?: string) => void;
   onEnd: () => void;
   onOpenEditor: () => void;
 }
 
-const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, onEnd, onOpenEditor }) => {
+const GameScreen: React.FC<GameScreenProps> = ({ scene, story, characters, onNavigate, onEnd, onOpenEditor }) => {
   const [dialogueIndex, setDialogueIndex] = useState(0);
   const [isTyping, setIsTyping] = useState(true);
   const [activeSprites, setActiveSprites] = useState<Record<string, string>>({});
+  
+  // Runtime State for Variables
+  const [variables, setVariables] = useState<Record<string, any>>({});
+
+  // Initialize variables on mount
+  useEffect(() => {
+      const initialVars: Record<string, any> = {};
+      if (story.variables) {
+          Object.values(story.variables).forEach((v: StoryVariable) => {
+              initialVars[v.id] = v.initialValue;
+          });
+      }
+      setVariables(initialVars);
+  }, [story.variables]);
 
   const currentLine = scene.dialogue[dialogueIndex] as DialogueItem | undefined;
 
@@ -25,11 +43,38 @@ const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, 
     setIsTyping(true);
   }, [scene]);
 
+  // Handle automatic progression for logic lines (set_variable)
+  useEffect(() => {
+      if (currentLine?.type === 'set_variable') {
+          const { variableId, operation, value } = currentLine;
+          
+          setVariables(prev => {
+              const currentVal = prev[variableId];
+              let newVal = currentVal;
+
+              if (operation === 'set') {
+                  newVal = value;
+              } else if (operation === 'add') {
+                  newVal = (Number(currentVal) || 0) + (Number(value) || 0);
+              } else if (operation === 'subtract') {
+                  newVal = (Number(currentVal) || 0) - (Number(value) || 0);
+              } else if (operation === 'toggle') {
+                  newVal = !currentVal;
+              }
+              
+              return { ...prev, [variableId]: newVal };
+          });
+
+          // Move to next line automatically
+          setDialogueIndex(prev => prev + 1);
+      }
+  }, [currentLine]);
+
   useEffect(() => {
     // Handle non-interactive dialogue items
     if (currentLine) {
       if (currentLine.type === 'transition') {
-        onNavigate(currentLine.nextSceneId);
+        onNavigate(currentLine.nextSceneId, currentLine.nextStoryId);
       } else if (currentLine.type === 'end_story') {
         onEnd();
       } else if (currentLine.type === 'text') {
@@ -59,6 +104,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, 
       return;
     }
     
+    // Skip clicks on set_variable lines as they auto-advance, but safety check here
+    if (currentLine.type === 'set_variable') return;
+
     if (currentLine.type !== 'text' && currentLine.type !== 'image' && currentLine.type !== 'video') {
         return;
     }
@@ -68,8 +116,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, 
     }
   }, [isTyping, dialogueIndex, scene.dialogue.length, currentLine]);
 
-  const handleChoice = useCallback((nextSceneId: string) => {
-    onNavigate(nextSceneId);
+  const handleChoice = useCallback((nextSceneId: string, nextStoryId?: string) => {
+    onNavigate(nextSceneId, nextStoryId);
   }, [onNavigate]);
 
   const handleFinishedTyping = useCallback(() => {
@@ -82,8 +130,31 @@ const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, 
     const sprite = char.sprites.find(s => s.id === spriteId);
     return sprite ? sprite.url : (char.sprites.find(s=> s.id === char.defaultSpriteId)?.url || '');
   };
+  
+  const checkConditions = (conditions?: Condition[]) => {
+      if (!conditions || conditions.length === 0) return true;
+      return conditions.every(cond => {
+          const currentVal = variables[cond.variableId];
+          const targetVal = cond.value;
+          
+          switch (cond.operator) {
+              case 'eq': return currentVal == targetVal;
+              case 'neq': return currentVal != targetVal;
+              case 'gt': return currentVal > targetVal;
+              case 'lt': return currentVal < targetVal;
+              case 'gte': return currentVal >= targetVal;
+              case 'lte': return currentVal <= targetVal;
+              default: return true;
+          }
+      });
+  };
 
   const isClickable = !isTyping && (currentLine?.type === 'text' || currentLine?.type === 'image' || currentLine.type === 'video');
+
+  // Filter choices based on conditions
+  const visibleChoices = currentLine?.type === 'choice' 
+    ? currentLine.choices.filter(c => checkConditions(c.conditions))
+    : [];
 
   return (
     <div className="relative w-full h-full overflow-hidden select-none" >
@@ -133,7 +204,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, 
 
       {currentLine?.type === 'choice' && (
         <ChoiceButtons
-          choices={currentLine.choices}
+          choices={visibleChoices}
           onChoiceSelect={handleChoice}
         />
       )}

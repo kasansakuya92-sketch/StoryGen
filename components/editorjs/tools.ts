@@ -1,4 +1,7 @@
-import { Character, CharactersData, Choice, Scene, ScenesData, DialogueLength, AIPromptLine } from '../../types.ts';
+
+
+
+import { Character, CharactersData, Choice, Scene, ScenesData, DialogueLength, AIPromptLine, StoryVariable, VariableOperation, Condition, Project, Story } from '../../types.ts';
 
 const commonInputClass = "bg-card/80 border-border rounded p-1 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none w-full";
 const commonSelectClass = "bg-card/80 border-border rounded p-1 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none";
@@ -99,15 +102,21 @@ export class TextTool {
 export class ChoiceTool {
     private data: { choices: Choice[] };
     private scenes: ScenesData;
+    private project: Project;
+    private currentStoryId: string;
+    private variables: Record<string, StoryVariable>;
     private wrapper: HTMLDivElement | null = null;
     private choicesContainer: HTMLDivElement | null = null;
     
     static get isInline() { return false; }
     static get toolbox() { return { title: 'Choice', icon: '❔' }; }
 
-    constructor({ data, config }: { data: { choices: Choice[] }, config: { scenes: ScenesData }}) {
+    constructor({ data, config }: { data: { choices: Choice[] }, config: { scenes: ScenesData, variables: Record<string, StoryVariable>, project: Project, currentStoryId: string }}) {
         this.data = { choices: data.choices || [{ text: '', nextSceneId: '' }] };
         this.scenes = config.scenes;
+        this.project = config.project;
+        this.currentStoryId = config.currentStoryId;
+        this.variables = config.variables || {};
     }
 
     render() {
@@ -132,23 +141,56 @@ export class ChoiceTool {
     addChoiceRow(choice: Choice) {
         if (!this.choicesContainer) return;
         const row = document.createElement('div');
-        row.className = 'flex gap-2 items-center';
+        row.className = 'flex flex-col bg-card/30 p-2 rounded border border-border/50';
+        
+        const mainRow = document.createElement('div');
+        mainRow.className = 'flex gap-2 items-center mb-2 flex-wrap';
 
         const textInput = document.createElement('input');
         textInput.type = 'text';
         textInput.placeholder = 'Choice text...';
         textInput.value = choice.text;
-        textInput.className = `${commonInputClass} flex-grow`;
+        textInput.className = `${commonInputClass} flex-grow choice-text min-w-[150px]`;
         
-        const sceneSelect = document.createElement('select');
-        sceneSelect.className = `${commonSelectClass} w-1/3`;
-        const defaultOption = new Option('Select Scene...', '');
-        sceneSelect.add(defaultOption);
-        Object.values(this.scenes).forEach((s: Scene) => {
+        // Story Select
+        const storySelect = document.createElement('select');
+        storySelect.className = `${commonSelectClass} w-1/3 choice-story min-w-[100px]`;
+        storySelect.title = "Select Target Story";
+        
+        Object.values(this.project.stories).forEach((s: Story) => {
             const option = new Option(s.name, s.id);
-            sceneSelect.add(option);
+            if (s.id === this.currentStoryId) option.text += " (Current)";
+            storySelect.add(option);
         });
+        storySelect.value = choice.nextStoryId || this.currentStoryId;
+
+        // Scene Select
+        const sceneSelect = document.createElement('select');
+        sceneSelect.className = `${commonSelectClass} w-1/3 choice-next min-w-[100px]`;
+        sceneSelect.title = "Select Target Scene";
+
+        const populateScenes = (storyId: string) => {
+             sceneSelect.innerHTML = '';
+             const defaultOption = new Option('Select Scene...', '');
+             sceneSelect.add(defaultOption);
+             
+             const selectedStory = this.project.stories[storyId];
+             if (selectedStory) {
+                 Object.values(selectedStory.scenes).forEach((s: Scene) => {
+                     const option = new Option(s.name, s.id);
+                     sceneSelect.add(option);
+                 });
+             }
+        };
+        
+        storySelect.onchange = () => {
+            populateScenes(storySelect.value);
+        };
+
+        // Init Scene Options
+        populateScenes(storySelect.value);
         sceneSelect.value = choice.nextSceneId;
+
 
         const deleteButton = document.createElement('button');
         deleteButton.type = 'button';
@@ -156,22 +198,95 @@ export class ChoiceTool {
         deleteButton.className = 'text-destructive/70 hover:text-destructive font-bold text-xl';
         deleteButton.onclick = () => row.remove();
 
-        row.appendChild(textInput);
-        row.appendChild(sceneSelect);
-        row.appendChild(deleteButton);
+        mainRow.appendChild(textInput);
+        mainRow.appendChild(storySelect);
+        mainRow.appendChild(sceneSelect);
+        mainRow.appendChild(deleteButton);
+        row.appendChild(mainRow);
+
+        // Conditions Logic
+        const conditionRow = document.createElement('div');
+        conditionRow.className = 'text-xs text-foreground/60 space-y-1';
+        conditionRow.innerHTML = `<div class="font-bold">Conditions (Show if...):</div><div class="conditions-list space-y-1"></div><button type="button" class="add-cond-btn text-primary hover:underline">+ Add Condition</button>`;
+        
+        const conditionsList = conditionRow.querySelector('.conditions-list') as HTMLDivElement;
+        
+        // Helper to render a single condition line
+        const renderCondition = (cond: Condition) => {
+            const cDiv = document.createElement('div');
+            cDiv.className = 'flex gap-1 items-center bg-background/50 rounded p-1';
+            
+            const varSelect = document.createElement('select');
+            varSelect.className = 'bg-transparent border-none outline-none text-xs font-mono w-24';
+            Object.values(this.variables).forEach(v => varSelect.add(new Option(v.name, v.id)));
+            varSelect.value = cond.variableId;
+
+            const opSelect = document.createElement('select');
+            opSelect.className = 'bg-transparent border-none outline-none text-xs font-bold';
+            ['eq', 'neq', 'gt', 'lt', 'gte', 'lte'].forEach(op => opSelect.add(new Option(op, op)));
+            opSelect.value = cond.operator;
+
+            const valInput = document.createElement('input');
+            valInput.className = 'bg-transparent border-b border-border/50 outline-none text-xs w-16';
+            valInput.value = cond.value;
+
+            const delBtn = document.createElement('button');
+            delBtn.innerText = 'x';
+            delBtn.className = 'text-destructive hover:text-red-600 px-1';
+            delBtn.onclick = () => cDiv.remove();
+
+            cDiv.appendChild(varSelect);
+            cDiv.appendChild(opSelect);
+            cDiv.appendChild(valInput);
+            cDiv.appendChild(delBtn);
+            conditionsList.appendChild(cDiv);
+        };
+
+        if (choice.conditions) {
+            choice.conditions.forEach(renderCondition);
+        }
+
+        (conditionRow.querySelector('.add-cond-btn') as HTMLButtonElement).onclick = () => {
+            if (Object.keys(this.variables).length > 0) {
+                 renderCondition({ variableId: Object.keys(this.variables)[0], operator: 'eq', value: '' });
+            } else {
+                alert("No variables defined. Create some in the Variable Manager first.");
+            }
+        };
+
+        row.appendChild(conditionRow);
         this.choicesContainer.appendChild(row);
     }
     
     save() {
         if (!this.choicesContainer) return { choices: [] };
         const newChoices: Choice[] = [];
-        this.choicesContainer.querySelectorAll('.flex.gap-2').forEach(row => {
-            const textInput = row.querySelector('input[type="text"]') as HTMLInputElement;
-            const sceneSelect = row.querySelector('select') as HTMLSelectElement;
+        this.choicesContainer.querySelectorAll('.flex.flex-col').forEach(row => {
+            const textInput = row.querySelector('.choice-text') as HTMLInputElement;
+            const storySelect = row.querySelector('.choice-story') as HTMLSelectElement;
+            const sceneSelect = row.querySelector('.choice-next') as HTMLSelectElement;
+            
             if (textInput && sceneSelect) {
+                const conditions: Condition[] = [];
+                row.querySelectorAll('.conditions-list > div').forEach(condRow => {
+                    const selects = condRow.querySelectorAll('select');
+                    const input = condRow.querySelector('input');
+                    if (selects.length === 2 && input) {
+                        conditions.push({
+                            variableId: selects[0].value,
+                            operator: selects[1].value as any,
+                            value: input.value // Simply storing as string, comparison logic handles casting if needed or use stricter inputs
+                        });
+                    }
+                });
+
+                const nextStoryId = storySelect.value === this.currentStoryId ? undefined : storySelect.value;
+
                 newChoices.push({
                     text: textInput.value,
-                    nextSceneId: sceneSelect.value
+                    nextSceneId: sceneSelect.value,
+                    nextStoryId: nextStoryId,
+                    conditions: conditions.length > 0 ? conditions : undefined
                 });
             }
         });
@@ -180,44 +295,85 @@ export class ChoiceTool {
 }
 
 export class TransitionTool {
-    private data: { nextSceneId: string };
+    private data: { nextSceneId: string; nextStoryId?: string };
     private scenes: ScenesData;
+    private project: Project;
+    private currentStoryId: string;
     
     static get isInline() { return false; }
     static get toolbox() { return { title: 'Transition', icon: '➔' }; }
 
-    constructor({ data, config }: { data: { nextSceneId: string }, config: { scenes: ScenesData }}) {
-        this.data = { nextSceneId: data.nextSceneId || '' };
+    constructor({ data, config }: { data: { nextSceneId: string, nextStoryId?: string }, config: { scenes: ScenesData, project: Project, currentStoryId: string }}) {
+        this.data = { nextSceneId: data.nextSceneId || '', nextStoryId: data.nextStoryId };
         this.scenes = config.scenes;
+        this.project = config.project;
+        this.currentStoryId = config.currentStoryId;
     }
 
     render() {
         const wrapper = document.createElement('div');
-        wrapper.className = 'flex gap-2 items-center p-2';
+        wrapper.className = 'flex gap-2 items-center p-2 flex-wrap';
         
         const label = document.createElement('span');
         label.innerText = 'Transition to:';
-        label.className = 'text-sm';
-
-        const sceneSelect = document.createElement('select');
-        sceneSelect.className = `${commonSelectClass} flex-grow`;
-        const defaultOption = new Option('Select Scene...', '');
-        sceneSelect.add(defaultOption);
-        Object.values(this.scenes).forEach((s: Scene) => {
+        label.className = 'text-sm font-bold mr-1';
+        
+        // Story Select
+        const storySelect = document.createElement('select');
+        storySelect.className = `${commonSelectClass} w-1/3 min-w-[120px]`;
+        storySelect.id = 'story-select';
+        
+        Object.values(this.project.stories).forEach((s: Story) => {
             const option = new Option(s.name, s.id);
-            sceneSelect.add(option);
+            if (s.id === this.currentStoryId) option.text += " (Current)";
+            storySelect.add(option);
         });
-        sceneSelect.value = this.data.nextSceneId;
+        storySelect.value = this.data.nextStoryId || this.currentStoryId;
+
+        // Scene Select
+        const sceneSelect = document.createElement('select');
+        sceneSelect.className = `${commonSelectClass} flex-grow min-w-[120px]`;
         sceneSelect.id = 'scene-select';
+        
+        const populateScenes = (storyId: string) => {
+             sceneSelect.innerHTML = '';
+             const defaultOption = new Option('Select Scene...', '');
+             sceneSelect.add(defaultOption);
+             
+             const selectedStory = this.project.stories[storyId];
+             if (selectedStory) {
+                 Object.values(selectedStory.scenes).forEach((s: Scene) => {
+                     const option = new Option(s.name, s.id);
+                     sceneSelect.add(option);
+                 });
+             }
+        };
+
+        storySelect.onchange = () => {
+            populateScenes(storySelect.value);
+        };
+
+        // Init
+        populateScenes(storySelect.value);
+        sceneSelect.value = this.data.nextSceneId;
+
 
         wrapper.appendChild(label);
+        wrapper.appendChild(storySelect);
         wrapper.appendChild(sceneSelect);
         return wrapper;
     }
 
     save(blockElement: HTMLDivElement) {
-        const select = blockElement.querySelector('#scene-select') as HTMLSelectElement;
-        return { nextSceneId: select.value };
+        const sceneSelect = blockElement.querySelector('#scene-select') as HTMLSelectElement;
+        const storySelect = blockElement.querySelector('#story-select') as HTMLSelectElement;
+        
+        const nextStoryId = storySelect.value === this.currentStoryId ? undefined : storySelect.value;
+
+        return { 
+            nextSceneId: sceneSelect.value,
+            nextStoryId: nextStoryId
+        };
     }
 }
 
@@ -508,6 +664,87 @@ export class AIPromptTool {
         return {
             id: this.data.id,
             config: newConfig,
+        };
+    }
+}
+
+export class SetVariableTool {
+    private data: { variableId: string; operation: VariableOperation; value: any };
+    private variables: Record<string, StoryVariable>;
+    private wrapper: HTMLDivElement | null = null;
+
+    static get isInline() { return false; }
+    static get toolbox() { return { title: 'Set Variable', icon: '🔧' }; }
+
+    constructor({ data, config }: { data: any, config: { variables: Record<string, StoryVariable> } }) {
+        this.data = {
+            variableId: data.variableId || '',
+            operation: data.operation || 'set',
+            value: data.value || ''
+        };
+        this.variables = config.variables || {};
+    }
+
+    render() {
+        this.wrapper = document.createElement('div');
+        this.wrapper.className = 'flex gap-2 items-center p-2 bg-secondary/10 border border-border/20 rounded-md';
+
+        if (Object.keys(this.variables).length === 0) {
+            this.wrapper.innerText = 'No variables defined. Use Variable Manager first.';
+            this.wrapper.className += ' text-sm text-foreground/60';
+            return this.wrapper;
+        }
+
+        const label = document.createElement('span');
+        label.innerHTML = '<b>Logic:</b>';
+        label.className = 'text-xs mr-1';
+        
+        const varSelect = document.createElement('select');
+        varSelect.className = commonSelectClass + ' w-auto';
+        Object.values(this.variables).forEach(v => {
+            varSelect.add(new Option(v.name, v.id));
+        });
+        varSelect.value = this.data.variableId || Object.keys(this.variables)[0];
+
+        const opSelect = document.createElement('select');
+        opSelect.className = commonSelectClass + ' w-auto';
+        ['set', 'add', 'subtract', 'toggle'].forEach(op => opSelect.add(new Option(op, op)));
+        opSelect.value = this.data.operation;
+
+        const valInput = document.createElement('input');
+        valInput.type = 'text';
+        valInput.className = commonInputClass + ' w-24';
+        valInput.placeholder = 'Value';
+        valInput.value = this.data.value;
+
+        // Logic to hide value input for toggle
+        const updateVisibility = () => {
+            if (opSelect.value === 'toggle') {
+                valInput.style.display = 'none';
+            } else {
+                valInput.style.display = 'block';
+            }
+        };
+        opSelect.onchange = updateVisibility;
+        updateVisibility();
+
+        this.wrapper.appendChild(label);
+        this.wrapper.appendChild(varSelect);
+        this.wrapper.appendChild(opSelect);
+        this.wrapper.appendChild(valInput);
+
+        return this.wrapper;
+    }
+
+    save() {
+        if (!this.wrapper || Object.keys(this.variables).length === 0) return this.data;
+        const selects = this.wrapper.querySelectorAll('select');
+        const input = this.wrapper.querySelector('input');
+        
+        return {
+            variableId: selects[0].value,
+            operation: selects[1].value,
+            value: input ? input.value : ''
         };
     }
 }
