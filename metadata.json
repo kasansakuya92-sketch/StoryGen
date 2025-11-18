@@ -1,0 +1,5 @@
+{
+  "name": "AI Visual Novel Engine",
+  "description": "An engine to design visual novel games with integrated AI tools for conversation generation and smart sprite management. Export your stories to JSON.",
+  "requestFramePermissions": []
+}

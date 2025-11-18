@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Visual Novel Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/editorjs@latest"></script>
+    <link href="https://aistudiocdn.com/reactflow@^11.11.4/dist/style.css" rel="stylesheet">
+    <style>
+      :root {
+        --onyx: #393d3f;
+        --indian-red: #f15156;
+        --fawn: #ffc07f;
+        --sunset: #ffcf99;
+        --pink-lavender: #e4b7e5;
+
+        /* Light Theme */
+        --background-rgb: 253 250 246; /* #fdfaf6 */
+        --foreground-rgb: 57 61 63; /* #393d3f */
+        --card-rgb: 255 255 255;
+        --primary-rgb: 241 81 86; /* #f15156 */
+        --secondary-rgb: 255 192 127; /* #ffc07f */
+        --accent-rgb: 228 183 229; /* #e4b7e5 */
+        --destructive-rgb: 241 81 86; /* #f15156 */
+        --border-rgb: 57 61 63; /* #393d3f */
+        --ring-rgb: 241 81 86; /* #f15156 */
+      }
+
+      html.dark {
+        /* Dark Theme */
+        --background-rgb: 37 40 40; /* #252828 */
+        --foreground-rgb: 240 233 225; /* #f0e9e1 */
+        --card-rgb: 57 61 63;
+        --primary-rgb: 241 81 86;
+        --secondary-rgb: 255 192 127;
+        --accent-rgb: 228 183 229;
+        --destructive-rgb: 241 81 86;
+        --border-rgb: 240 233 225;
+        --ring-rgb: 241 81 86;
+      }
+      
+      body {
+        font-family: 'Poppins', sans-serif;
+        background-color: rgb(var(--background-rgb));
+        background-image: radial-gradient(circle at top left, rgba(var(--secondary-rgb), 0.1), transparent 40%),
+                          radial-gradient(circle at bottom right, rgba(var(--accent-rgb), 0.1), transparent 40%);
+        min-height: 100vh;
+      }
+      
+      /* Simple scrollbar styling */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: rgba(var(--background-rgb), 0.5);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(var(--border-rgb), 0.3);
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(var(--border-rgb), 0.5);
+      }
+
+      /* EditorJS Custom Styles */
+      .codex-editor__redactor {
+        padding-bottom: 100px !important;
+      }
+      .ce-block__content, .ce-toolbar__content {
+        max-width: none;
+        margin: 0;
+      }
+      .ce-toolbar__actions {
+        right: 0;
+      }
+
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .animate-fade-in {
+        animation: fadeIn 0.5s ease-in-out forwards;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.25.0",
+    "reactflow": "https://aistudiocdn.com/reactflow@^11.11.4"
+  }
+}
+</script>
+<script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    border: 'rgb(var(--border-rgb) / <alpha-value>)',
+                    ring: 'rgb(var(--ring-rgb) / <alpha-value>)',
+                    background: 'rgb(var(--background-rgb) / <alpha-value>)',
+                    foreground: 'rgb(var(--foreground-rgb) / <alpha-value>)',
+                    primary: {
+                        DEFAULT: 'rgb(var(--primary-rgb) / <alpha-value>)',
+                        foreground: '#ffffff'
+                    },
+                    secondary: {
+                        DEFAULT: 'rgb(var(--secondary-rgb) / <alpha-value>)',
+                        foreground: '#393d3f'
+                    },
+                    destructive: {
+                        DEFAULT: 'rgb(var(--destructive-rgb) / <alpha-value>)',
+                        foreground: '#ffffff'
+                    },
+                    accent: {
+                        DEFAULT: 'rgb(var(--accent-rgb) / <alpha-value>)',
+                        foreground: '#393d3f'
+                    },
+                    card: {
+                        DEFAULT: 'rgb(var(--card-rgb) / <alpha-value>)',
+                        foreground: 'rgb(var(--foreground-rgb) / <alpha-value>)'
+                    },
+                }
+            }
+        }
+    }
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
