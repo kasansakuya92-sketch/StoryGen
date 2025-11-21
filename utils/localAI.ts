@@ -1,7 +1,6 @@
+
 // utils/localAI.ts
 import { ScenesData, CharactersData, Scene, DialogueLength, SceneLength, DialogueItem, TextLine, Character, AIGeneratedScene, AIStructureType } from '../types.ts';
-import { logger } from './logger.ts';
-
 
 const getStoryContext = (scenes: ScenesData, characters: CharactersData, currentScene: Scene, useContinuity: boolean): string => {
   const characterDescriptions = Object.values(characters).map(c => 
@@ -32,6 +31,7 @@ const getStoryContext = (scenes: ScenesData, characters: CharactersData, current
       }).join('\n');
 
       if (dialogueLines) {
+          // FIX: Corrected typo from `dialogLines` to `dialogueLines`.
           recentDialogue = `\nRECENT DIALOGUE IN THIS SCENE:\n${dialogueLines}`;
       }
   }
@@ -70,6 +70,7 @@ function sanitizeAndParseJson(jsonString: string | undefined): any {
     try {
         return JSON.parse(cleanedString);
     } catch (error) {
+        // FIX: If parsing fails, attempt to fix common truncation issues from local models.
         let fixedString = cleanedString;
         
         // Attempt to close an unclosed array
@@ -94,7 +95,7 @@ function sanitizeAndParseJson(jsonString: string | undefined): any {
 }
 
 
-async function postToLocalModel(url: string, messages: { role: string; content: string }[], source: string): Promise<any> {
+async function postToLocalModel(url: string, messages: { role: string; content: string }[]): Promise<any> {
     if (!url) {
         throw new Error("Local model URL is not set. Please configure it in the settings.");
     }
@@ -106,8 +107,6 @@ async function postToLocalModel(url: string, messages: { role: string; content: 
         temperature: 0.7,
         stream: false,
     };
-    logger.addLog({ type: 'request', source: `${source} (Local)`, content: { url, body } });
-
 
     try {
         const response = await fetch(url, {
@@ -124,13 +123,9 @@ async function postToLocalModel(url: string, messages: { role: string; content: 
         const jsonResponse = await response.json();
         rawContent = jsonResponse.choices?.[0]?.message?.content;
         
-        const result = sanitizeAndParseJson(rawContent);
-        logger.addLog({ type: 'response', source: `${source} (Local)`, content: result });
-        return result;
+        return sanitizeAndParseJson(rawContent);
 
     } catch (error) {
-        const errorContent = error instanceof Error ? error.message : String(error);
-        logger.addLog({ type: 'error', source: `${source} (Local)`, content: { error: errorContent, rawContent } });
         if (error instanceof TypeError) {
              throw new Error(`Could not connect to the local model server at ${url}. Is it running and is CORS configured correctly?`);
         } else if (error instanceof SyntaxError) {
@@ -174,7 +169,7 @@ export const generateDialogueWithLocalAI = async (
     const prompt = `You are a visual novel writer. Based on the story context, write the next ${numLines} lines of dialogue.
 ${outcomeInstruction}${userInstruction}
 Use the provided character descriptions (appearance, talking style) to inform their dialogue.
-For descriptive text or narration that is not spoken by a character, use "characterId": null. These narrator lines should be more detailed and descriptive, like prose in a novel, describing actions, settings, or a character's internal thoughts.
+For descriptive text or narration that is not spoken by a character, use "characterId": null.
 
 Respond with a valid JSON array. Do not add any explanations or markdown.
 
@@ -208,7 +203,7 @@ EXAMPLE END STORY JSON:
         { role: 'user', content: prompt },
     ];
   
-  return postToLocalModel(url, messages, 'generateDialogue');
+  return postToLocalModel(url, messages);
 };
 
 // Helper to convert title to snake_case id
@@ -217,149 +212,177 @@ const titleToId = (title: string) => title.toLowerCase().replace(/\s+/g, '_').re
 
 /**
  * Extracts an array from a model's JSON response, handling cases where the model
- * might wrap the array in an object (e.g., {"data": [...]}). This version is stricter
- * than the previous one to provide better error messages.
+ * might wrap the array in an object (e.g., {"data": [...]}).
  * @param response The parsed JSON response from the model.
  * @param itemValidator A type guard function to validate each item in the array.
  * @returns The extracted and validated array.
- * @throws An error if a valid array cannot be found or if items are invalid.
+ * @throws An error if a valid array cannot be found.
  */
 function extractArrayFromResponse<T>(response: any, itemValidator: (item: any) => item is T): T[] {
     if (Array.isArray(response)) {
-        // If the top-level response is an array, filter it.
-        // This is lenient with invalid items, just filters them out.
         return response.filter(itemValidator);
-    } 
-    
-    if (typeof response === 'object' && response !== null) {
-        // Look for the first property that holds an array.
-        for (const key in response) {
-            if (Object.prototype.hasOwnProperty.call(response, key)) {
-                const value = response[key];
-                if (Array.isArray(value)) {
-                    // Found an array. Now, we are strict. ALL items must be valid.
-                    if (value.every(itemValidator)) {
-                        return value;
-                    } else {
-                        // Some items are invalid. Fail fast with a specific error.
-                        const invalidCount = value.length - value.filter(itemValidator).length;
-                        throw new Error(`Local AI returned an array in property '${key}', but ${invalidCount} of its items did not match the expected type.`);
-                    }
-                }
-            }
+    } else if (typeof response === 'object' && response !== null) {
+        // Find the first property that is an array and whose items pass validation.
+        const arrayProperty = Object.values(response).find(value => 
+            Array.isArray(value) && value.every(itemValidator)
+        );
+        if (arrayProperty && Array.isArray(arrayProperty)) {
+            return arrayProperty;
+        } else {
+            throw new Error("Local AI returned an object, but it did not contain a recognizable array matching the expected type.");
         }
-        // No array property found in the object.
-        throw new Error("Local AI returned an object, but it did not contain a recognizable array property.");
     }
-
-    // The response is not an array or an object containing an array.
-    throw new Error(`Local AI did not return a valid array. Instead, received type: ${typeof response}`);
+    throw new Error("Local AI did not return a valid array.");
 }
 
 
 export const generateStoryPlanWithLocalAI = async (
     url: string,
     prompt: string, 
-    sceneLength: SceneLength | 'Epic' = 'Short',
+    sceneLength: SceneLength = 'Short',
     storyType: 'branching' | 'linear' = 'branching'
 ): Promise<any> => {
-    // This function now uses a multi-step process for reliability.
-    const lengthMap = { 'Short': '3-4', 'Medium': '5-6', 'Long': '7-8', 'Epic': '12-15' };
+    // New multi-step logic for simpler local models
+    const lengthMap = { 'Short': '3-4', 'Medium': '5-6', 'Long': '7-8' };
     const numScenes = lengthMap[sceneLength];
 
     // STEP 1: Generate Characters
-    const charactersPrompt = `You are a creative writer. Based on the user's prompt, create 2-3 main characters. Respond with a valid JSON array of character objects. Each object must have a short, lowercase 'id', a 'name', an 'appearance' description, and a 'talkingStyle' description. Do not add any explanations or markdown.
+    const charactersPrompt = `You are a creative writer. Based on the user's prompt, create all characters that appear in the story.
+
+Respond with a valid JSON array of character objects. Each object should have a short, lowercase 'id', a 'name', an 'appearance' description, a 'talkingStyle' description, and a 'gender' (one of 'male', 'female', 'trans', 'neutral'). Do not add any explanations or markdown.
+
 ---
-USER PROMPT: "${prompt}"
+USER PROMPT:
+"${prompt}"
 ---
+
 EXAMPLE JSON OUTPUT:
 [
-  { "id": "kai", "name": "Kai", "appearance": "Wears a worn leather jacket.", "talkingStyle": "Speaks quickly." },
-  { "id": "lena", "name": "Lena", "appearance": "Has long, silver hair.", "talkingStyle": "Calm and measured." }
+  { "id": "kai", "name": "Kai", "appearance": "Wears a worn leather jacket and has a scar over his left eye.", "talkingStyle": "Speaks quickly and with a lot of technical jargon.", "gender": "male" },
+  { "id": "lena", "name": "Lena", "appearance": "Has long, silver hair and prefers elegant, flowing robes.", "talkingStyle": "Calm, measured, and speaks very formally.", "gender": "female" }
 ]`;
-    const isCharacter = (item: any): item is { id: string; name: string; appearance: string; talkingStyle: string } => 
-        typeof item === 'object' && item !== null && 'id' in item && 'name' in item;
-    const rawCharactersResponse = await postToLocalModel(url, [{ role: 'system', content: "You only respond in valid JSON." }, { role: 'user', content: charactersPrompt }], 'generateStoryPlan-Characters');
+    
+    // Type guard for character objects
+    const isCharacter = (item: any): item is { id: string; name: string; appearance: string; talkingStyle: string; gender: string } => {
+        return typeof item === 'object' && item !== null && typeof item.id === 'string' && typeof item.name === 'string' && typeof item.appearance === 'string' && typeof item.talkingStyle === 'string';
+    };
+    
+    const rawCharactersResponse = await postToLocalModel(url, [
+        { role: 'system', content: "You are an AI assistant that only responds in valid JSON format." },
+        { role: 'user', content: charactersPrompt },
+    ]);
     const characters = extractArrayFromResponse(rawCharactersResponse, isCharacter);
-    const allCharacterIds = characters.map(c => c.id);
+
 
     // STEP 2: Generate Scene Outline
     const characterListForPrompt = characters.map(c => `- ${c.name} (id: ${c.id})`).join('\n');
-    const sceneOutlinePrompt = `You are a story plotter. Based on the user's prompt and characters, outline a story with ${numScenes} scene titles. Respond with a valid JSON array of strings. Do not add any explanations or markdown.
+    const sceneOutlinePrompt = `You are a story plotter. Based on the user's prompt and the list of characters, outline a short story with ${numScenes} scene titles.
+
+Respond with a valid JSON array of strings, where each string is a scene title. The first scene should be the beginning of the story. Do not add any explanations or markdown.
+
 ---
-USER PROMPT: "${prompt}"
+USER PROMPT:
+"${prompt}"
 CHARACTERS:
 ${characterListForPrompt}
 ---
-EXAMPLE JSON OUTPUT: ["A Mysterious Letter", "The Crossroads", "The Forest Path"]`;
-    const isString = (item: any): item is string => typeof item === 'string';
-    const rawSceneTitlesResponse = await postToLocalModel(url, [{ role: 'system', content: "You only respond in valid JSON." }, { role: 'user', content: sceneOutlinePrompt }], 'generateStoryPlan-Scenes');
-    const sceneTitles = extractArrayFromResponse(rawSceneTitlesResponse, isString);
 
+EXAMPLE JSON OUTPUT:
+[
+  "A Mysterious Letter",
+  "The Crossroads",
+  "The Forest Path"
+]`;
+    
+    // Type guard for strings
+    const isString = (item: any): item is string => typeof item === 'string';
+
+    const rawSceneTitlesResponse = await postToLocalModel(url, [
+        { role: 'system', content: "You are an AI assistant that only responds in valid JSON format." },
+        { role: 'user', content: sceneOutlinePrompt },
+    ]);
+    const sceneTitles = extractArrayFromResponse(rawSceneTitlesResponse, isString);
+    
+    // Create a map of titles to IDs, ensuring the first scene is 'start'
     const sceneTitleToIdMap = new Map<string, string>();
     sceneTitles.forEach((title, index) => {
         const id = index === 0 ? 'start' : titleToId(title);
         sceneTitleToIdMap.set(title, id);
     });
 
-    // STEP 3: Generate Variables
-    const variablePrompt = `You are a game designer. Based on the story prompt, create 2-3 global variables to track game state (e.g. 'health', 'trust', 'has_key'). Respond with a valid JSON array of objects with 'name', 'type' (boolean, number, string), and 'initialValue'.
----
-USER PROMPT: "${prompt}"
----
-EXAMPLE JSON OUTPUT:
-[
-    { "name": "Trust", "type": "number", "initialValue": 0 },
-    { "name": "Has Artifact", "type": "boolean", "initialValue": false }
-]`;
-    const rawVariablesResponse = await postToLocalModel(url, [{ role: 'system', content: "You only respond in valid JSON." }, { role: 'user', content: variablePrompt }], 'generateStoryPlan-Variables');
-    const variables = Array.isArray(rawVariablesResponse) ? rawVariablesResponse : [];
-
-
-    // STEP 4: Generate details for each scene iteratively
+    // STEP 3: Generate details for each scene iteratively
     const scenes: any[] = [];
+    let previousSceneSummary = "This is the first scene.";
+    const allSceneIdsForPrompt = Array.from(sceneTitleToIdMap.values());
+
     for (const currentSceneTitle of sceneTitles) {
-        const sceneDetailPrompt = `You are a visual novel scene writer. For the scene titled "${currentSceneTitle}", provide a one-sentence summary and list the characters present. Respond with a single valid JSON object. Do not add any explanations or markdown.
+        const currentSceneId = sceneTitleToIdMap.get(currentSceneTitle)!;
+        const otherSceneIdsForPrompt = allSceneIdsForPrompt.filter(id => id !== currentSceneId).map(id => `'${id}'`).join(', ');
+
+        const sceneDetailPrompt = `You are a visual novel scene writer. Your task is to detail a single scene based on the overall story context.
+
+Respond with a single valid JSON object for the current scene. Do not add any explanations or markdown.
+
 ---
 OVERALL STORY PROMPT: "${prompt}"
 ALL CHARACTERS IN STORY:
 ${characterListForPrompt}
+AVAILABLE SCENE IDs FOR OUTCOMES: ${otherSceneIdsForPrompt || 'none'}
+PREVIOUS SCENE SUMMARY: "${previousSceneSummary}"
+CURRENT SCENE TITLE: "${currentSceneTitle}"
 ---
-TASK: Respond with a JSON object with two keys:
-1. "summary": A one-sentence summary of what happens in this scene.
-2. "characterIds": a JSON array of character 'id's present in this scene. Pick from: ${allCharacterIds.join(', ')}.
 
-EXAMPLE JSON OUTPUT:
+TASK:
+For the scene "${currentSceneTitle}", provide the following details in a JSON object:
+1.  "summary": A one-sentence summary of what happens in this scene.
+2.  "characterIds": A JSON array of character 'id's present in this scene. Pick from the character list provided.
+3.  "outcome": A JSON object describing what happens at the end. It must have a "type" which is one of 'transition', 'choice', or 'end_story'.
+    - If "type" is 'transition', add a "nextSceneId" property. Its value MUST be one of the available scene IDs: ${otherSceneIdsForPrompt || 'none'}. If no other scenes are available, use 'end_story'.
+    - If "type" is 'choice', add a "choices" property, which is an array of 2 choice objects. Each choice object must have "text" and a "nextSceneId". The "nextSceneId" MUST be one of the available scene IDs: ${otherSceneIdsForPrompt || 'none'}. ${storyType === 'linear' ? 'IMPORTANT: Do not use the "choice" type for this story.' : ''}
+    - If "type" is 'end_story', no other properties are needed in the outcome.
+
+EXAMPLE JSON OUTPUT for a transition:
 {
   "summary": "Kai finds a strange letter on his doorstep that seems to glow with a faint light.",
-  "characterIds": ["kai"]
+  "characterIds": ["kai"],
+  "outcome": {
+    "type": "transition",
+    "nextSceneId": "the_crossroads"
+  }
 }`;
-        const sceneDetails = await postToLocalModel(url, [{ role: 'system', content: "You only respond in a single valid JSON object." }, { role: 'user', content: sceneDetailPrompt }], 'generateStoryPlan-SceneDetail');
-        
-        const validSceneDetails = {
-            summary: typeof sceneDetails?.summary === 'string' && sceneDetails.summary.trim() ? sceneDetails.summary : `A scene about "${currentSceneTitle}".`,
-            characterIds: Array.isArray(sceneDetails?.characterIds) ? sceneDetails.characterIds.filter(id => allCharacterIds.includes(id)) : [],
-        };
+
+        const sceneDetails = await postToLocalModel(url, [
+            { role: 'system', content: "You are an AI assistant that only responds in a single valid JSON object format." },
+            { role: 'user', content: sceneDetailPrompt },
+        ]);
 
         scenes.push({
-            id: sceneTitleToIdMap.get(currentSceneTitle)!,
+            id: currentSceneId,
             name: currentSceneTitle,
-            summary: validSceneDetails.summary,
-            characterIds: validSceneDetails.characterIds,
+            ...sceneDetails,
         });
+        
+        previousSceneSummary = sceneDetails.summary;
     }
 
-    // STEP 5: Assemble and return final plan
-    const finalCharactersData: CharactersData = {};
-    characters.forEach(c => {
-        finalCharactersData[c.id] = {
+    // STEP 4: Assemble and return final plan
+    const finalCharacters = characters.map(c => {
+        const validGenders = ['male', 'female', 'trans', 'neutral'];
+        const gender = validGenders.includes(c.gender) ? c.gender : 'neutral';
+        return {
             ...c,
+            gender: gender as 'male' | 'female' | 'trans' | 'neutral',
             defaultSpriteId: 'normal',
             sprites: [{ id: 'normal', url: `https://picsum.photos/seed/${c.id}/600/800` }],
         };
     });
 
-    return { characters: finalCharactersData, scenes, variables };
+    const finalCharactersData: CharactersData = {};
+    finalCharacters.forEach(c => {
+        finalCharactersData[c.id] = c;
+    });
+
+    return { characters: finalCharactersData, scenes };
 };
 
 
@@ -425,7 +448,7 @@ export const generateCharacterDetailsWithLocalAI = async (
 ): Promise<Omit<Character, 'id' | 'sprites' | 'defaultSpriteId'>> => {
     const fullPrompt = `You are a creative character designer for a visual novel. Based on the user's prompt, create a single, compelling character.
 
-Respond with a single valid JSON object with three keys: "name", "appearance", and "talkingStyle". Do not add any explanations or markdown.
+Respond with a single valid JSON object with keys: "name", "appearance", "talkingStyle", and "gender". Do not add any explanations or markdown.
 
 ---
 USER PROMPT:
@@ -436,7 +459,8 @@ EXAMPLE JSON OUTPUT:
 {
   "name": "Jax 'The Fixer' Riley",
   "appearance": "A tall, wiry man with cybernetic eyes that glow a faint blue. He wears a dusty, long coat over practical, grease-stained fatigues.",
-  "talkingStyle": "Speaks in short, clipped sentences. Uses a lot of technical slang and is often sarcastic."
+  "talkingStyle": "Speaks in short, clipped sentences. Uses a lot of technical slang and is often sarcastic.",
+  "gender": "male"
 }`;
   
   const messages = [
@@ -444,7 +468,7 @@ EXAMPLE JSON OUTPUT:
     { role: 'user', content: fullPrompt }
   ];
 
-  return postToLocalModel(url, messages, 'generateCharacterDetails');
+  return postToLocalModel(url, messages);
 };
 
 
@@ -601,5 +625,5 @@ ${exampleStructure}
         { role: 'user', content: fullPrompt }
     ];
 
-    return postToLocalModel(url, messages, 'generateSceneStructure');
+    return postToLocalModel(url, messages);
 };

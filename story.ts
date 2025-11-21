@@ -1,8 +1,8 @@
-
 // story.ts
+// FIX: Import `ScenesData` type.
 import { ProjectsData, ScenesData, CharactersData } from './types.ts';
 
-export const defaultCharacters: CharactersData = {
+const characters: CharactersData = {
   'hero': {
     id: 'hero',
     name: 'Hero',
@@ -27,6 +27,7 @@ export const defaultCharacters: CharactersData = {
   },
 };
 
+// FIX: Add explicit type `ScenesData` to the `scenes` constant to ensure correct type checking for character positions.
 const scenes: ScenesData = {
   'start': {
     id: 'start',
@@ -99,18 +100,13 @@ export const initialProjectsData: ProjectsData = {
     'proj_1': {
         id: 'proj_1',
         name: 'My First Project',
-        characters: defaultCharacters,
-        backgrounds: {},
         stories: {
             'story_1': {
                 id: 'story_1',
                 name: 'A Simple Adventure',
+                characters: characters,
                 startSceneId: 'start',
-                scenes: scenes,
-                variables: {
-                  'has_sword': { id: 'has_sword', name: 'Has Sword', type: 'boolean', initialValue: false },
-                  'gold': { id: 'gold', name: 'Gold', type: 'number', initialValue: 10 },
-                }
+                scenes: scenes
             }
         }
     }

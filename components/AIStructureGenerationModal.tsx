@@ -1,26 +1,25 @@
 
 import React, { useState } from 'react';
-import { Scene, CharactersData, ScenesData, AIStructureType, AIGeneratedScene, Story } from '../types.ts';
+import { Scene, CharactersData, ScenesData, AIStructureType, AIGeneratedScene } from '../types.ts';
 import { generateSceneStructure } from '../utils/ai.ts';
 import { useSettings } from '../contexts/SettingsContext.tsx';
-import AIIcon from './icons/AIIcon.tsx';
 
 interface AIStructureGenerationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  story: Story;
-  characters: CharactersData;
+  allScenes: ScenesData;
+  allCharacters: CharactersData;
   onAddSceneStructure: (generated: { scenes: AIGeneratedScene[], connections: any }, sourceSceneId: string) => void;
 }
 
 const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({
   isOpen,
   onClose,
-  story,
-  characters,
+  allScenes,
+  allCharacters,
   onAddSceneStructure,
 }) => {
-  const [sourceSceneId, setSourceSceneId] = useState<string>(Object.keys(story.scenes)[0] || '');
+  const [sourceSceneId, setSourceSceneId] = useState<string>(Object.keys(allScenes)[0] || '');
   const [contextSceneIds, setContextSceneIds] = useState<string[]>([]);
   const [structureType, setStructureType] = useState<AIStructureType>('choice_branch');
   const [prompt, setPrompt] = useState('');
@@ -29,7 +28,7 @@ const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const { settings } = useSettings();
   
-  const sceneOptions = Object.values(story.scenes).map((s: Scene) => ({ value: s.id, label: s.name }));
+  const sceneOptions = Object.values(allScenes).map((s: Scene) => ({ value: s.id, label: s.name }));
   
   const handleContextChange = (sceneId: string) => {
     setContextSceneIds(prev =>
@@ -47,10 +46,9 @@ const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({
     try {
         const generatedData = await generateSceneStructure(
             settings,
-            story,
-            contextSceneIds,
-            sourceSceneId,
-            characters,
+            contextSceneIds.map(id => allScenes[id]),
+            allScenes[sourceSceneId],
+            allCharacters,
             prompt,
             structureType
         );
@@ -126,10 +124,10 @@ const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({
                  <button 
                     onClick={handleGenerate} 
                     disabled={isLoading || (settings.aiProvider === 'local' && !settings.localModelUrl)}
-                    className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-sm hover:bg-primary/90 disabled:opacity-50 w-32 flex items-center justify-center gap-2"
+                    className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-sm hover:bg-primary/90 disabled:opacity-50 w-32"
                     title={settings.aiProvider === 'local' && !settings.localModelUrl ? 'Please set the Local Model URL in settings.' : ''}
                 >
-                    {isLoading ? 'Generating...' : <><AIIcon className="w-4 h-4" /> Generate</>}
+                    {isLoading ? 'Generating...' : '✨ Generate'}
                 </button>
             </footer>
         </div>

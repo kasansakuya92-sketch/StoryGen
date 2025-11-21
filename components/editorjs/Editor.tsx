@@ -1,9 +1,7 @@
-
-
-
 import React, { useRef, useEffect, useMemo } from 'react';
-import { DialogueItem, Scene, ScenesData, CharactersData, Settings, TextLine, ChoiceLine, Transition, EndStory, AIPromptLine, ImageLine, VideoLine, Character, Story, Project } from '../../types.ts';
-import { TextTool, ChoiceTool, TransitionTool, EndStoryTool, AIPromptTool, ImageTool, VideoTool, SetVariableTool } from './tools.ts';
+// FIX: Add `Character` to imports to be used for explicit typing.
+import { DialogueItem, Scene, ScenesData, CharactersData, Settings, TextLine, ChoiceLine, Transition, EndStory, AIPromptLine, ImageLine, VideoLine, Character } from '../../types.ts';
+import { TextTool, ChoiceTool, TransitionTool, EndStoryTool, AIPromptTool, ImageTool, VideoTool } from './tools.ts';
 import { generateDialogueForScene } from '../../utils/ai.ts';
 
 // Make EditorJS globally available for TS
@@ -11,8 +9,6 @@ declare const EditorJS: any;
 
 interface DialogueEditorProps {
   scene: Scene;
-  story: Story;
-  project: Project; // Added project prop
   scenes: ScenesData;
   characters: CharactersData;
   onUpdateDialogue: (dialogue: DialogueItem[]) => void;
@@ -28,7 +24,7 @@ const toEditorJSData = (dialogue: DialogueItem[]) => {
             case 'choice':
                 return { type: 'choice', data: { choices: item.choices } };
             case 'transition':
-                return { type: 'transition', data: { nextSceneId: item.nextSceneId, nextStoryId: item.nextStoryId } };
+                return { type: 'transition', data: { nextSceneId: item.nextSceneId } };
             case 'end_story':
                 return { type: 'endStory', data: {} };
             case 'ai_prompt':
@@ -37,8 +33,6 @@ const toEditorJSData = (dialogue: DialogueItem[]) => {
                 return { type: 'image', data: { url: item.url } };
             case 'video':
                 return { type: 'video', data: { url: item.url } };
-            case 'set_variable':
-                return { type: 'setVariable', data: { variableId: item.variableId, operation: item.operation, value: item.value } };
             default:
                 return null;
         }
@@ -59,7 +53,7 @@ const fromEditorJSData = (editorData: any): DialogueItem[] => {
             case 'choice':
                 return { type: 'choice', choices: block.data.choices || [] };
             case 'transition':
-                return { type: 'transition', nextSceneId: block.data.nextSceneId || '', nextStoryId: block.data.nextStoryId || undefined };
+                return { type: 'transition', nextSceneId: block.data.nextSceneId || '' };
             case 'endStory':
                 return { type: 'end_story' };
             case 'aiPrompt':
@@ -68,21 +62,19 @@ const fromEditorJSData = (editorData: any): DialogueItem[] => {
                 return { type: 'image', url: block.data.url || '' };
             case 'video':
                 return { type: 'video', url: block.data.url || '' };
-            case 'setVariable':
-                return { type: 'set_variable', ...block.data };
             default:
                 return null;
         }
     }).filter((item: DialogueItem | null): item is DialogueItem => item !== null);
 };
 
-const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, project, scenes, characters, onUpdateDialogue, settings }) => {
+const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, scenes, characters, onUpdateDialogue, settings }) => {
     const editorInstance = useRef<any>(null);
     const holderId = `editorjs-holder-${scene.id}`;
+    const isInternalChange = useRef(false);
 
     // Create stable dependency strings for characters and scenes.
-    // This prevents the editor from re-initializing on every keystroke,
-    // which was causing the editor to lose focus and "refresh".
+    // This prevents the editor from re-initializing on every keystroke.
     const characterDeps = useMemo(() => {
         return Object.values(characters).map((c: Character) => `${c.id}:${c.name}`).sort().join(',');
     }, [characters]);
@@ -91,13 +83,20 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, project, 
         return Object.values(scenes).map((s: Scene) => `${s.id}:${s.name}`).sort().join(',');
     }, [scenes]);
 
-    const variableDeps = useMemo(() => {
-        return story.variables ? Object.keys(story.variables).sort().join(',') : '';
-    }, [story.variables]);
+    // Effect to handle external updates to dialogue (e.g. from AI generator outside editor)
+    useEffect(() => {
+        if (isInternalChange.current) {
+            isInternalChange.current = false;
+            return;
+        }
+
+        if (editorInstance.current && editorInstance.current.render) {
+            editorInstance.current.render(toEditorJSData(scene.dialogue));
+        }
+    }, [scene.dialogue]);
 
     useEffect(() => {
-        // Destroy the previous instance if it exists. This is crucial for re-initializing
-        // the editor with fresh props (like an updated character list) when they change.
+        // Destroy the previous instance if it exists.
         if (editorInstance.current && editorInstance.current.destroy) {
             editorInstance.current.destroy();
             editorInstance.current = null;
@@ -107,30 +106,26 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, project, 
             const promptBlockIndex = editorInstance.current.blocks.getCurrentBlockIndex();
 
             try {
-                // Get the latest dialogue state directly from the editor to avoid stale closures
-                const currentEditorData = await editorInstance.current.save();
-                const currentDialogue = fromEditorJSData(currentEditorData);
-                const currentSceneState = { ...scene, dialogue: currentDialogue };
-
-                const currentStoryState: Story = {
-                    ...story,
-                    scenes: {
-                        ...story.scenes,
-                        [scene.id]: currentSceneState,
-                    }
-                };
-
-                // The AI Prompt tool now only generates text to continue the scene.
-                // Pass characters separately now
-                const newItems = await generateDialogueForScene(settings, currentStoryState, scene.id, characters, config.dialogueLength, config.useContinuity, 'text_only', config.aiPrompt);
+                const newItems = await generateDialogueForScene(settings, scene, scenes, characters, config.dialogueLength, config.useContinuity, config.desiredOutcome, config.aiPrompt);
                 
                 const newEditorBlocks = toEditorJSData(newItems).blocks;
                 
                 if (newEditorBlocks.length > 0) {
-                    // Insert the new blocks *before* the AI Prompt block.
-                    for(let i = 0; i < newEditorBlocks.length; i++) {
-                        editorInstance.current.blocks.insert(newEditorBlocks[i].type, newEditorBlocks[i].data, {}, promptBlockIndex + i, true);
+                    // Replace the current block with the new ones
+                    editorInstance.current.blocks.delete(promptBlockIndex);
+                    editorInstance.current.blocks.insert(newEditorBlocks[0].type, newEditorBlocks[0].data, {}, promptBlockIndex, true);
+                    for(let i = 1; i < newEditorBlocks.length; i++) {
+                            editorInstance.current.blocks.insert(newEditorBlocks[i].type, newEditorBlocks[i].data, {}, promptBlockIndex + i, true);
                     }
+                    
+                    // Trigger save to update state immediately after generation
+                    const savedData = await editorInstance.current.save();
+                    const newDialogue = fromEditorJSData(savedData);
+                    isInternalChange.current = true;
+                    onUpdateDialogue(newDialogue);
+                    
+                } else {
+                        editorInstance.current.blocks.delete(promptBlockIndex);
                 }
                 
             } catch (e) {
@@ -143,7 +138,7 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, project, 
 
         const editor = new EditorJS({
             holder: holderId,
-            autofocus: false, // Disabled to prevent a `getLayoutMap()` permission error in sandboxed environments.
+            autofocus: false,
             data: toEditorJSData(scene.dialogue),
             tools: {
                 text: {
@@ -152,15 +147,11 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, project, 
                 },
                 choice: {
                     class: ChoiceTool,
-                    config: { scenes, variables: story.variables, project, currentStoryId: story.id },
-                },
-                setVariable: {
-                    class: SetVariableTool,
-                    config: { variables: story.variables }
+                    config: { scenes },
                 },
                 transition: {
                     class: TransitionTool,
-                    config: { scenes, project, currentStoryId: story.id },
+                    config: { scenes },
                 },
                 endStory: EndStoryTool,
                 image: ImageTool,
@@ -175,6 +166,7 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, project, 
             onChange: async () => {
                 const savedData = await editor.save();
                 const newDialogue = fromEditorJSData(savedData);
+                isInternalChange.current = true;
                 onUpdateDialogue(newDialogue);
             },
         });
@@ -186,11 +178,8 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, story, project, 
                 editorInstance.current = null;
             }
         };
-    // The component's `key` prop handles remounting when the scene changes.
-    // This dependency array ensures the editor re-initializes ONLY if the character or scene
-    // lists are updated (e.g., via Character Manager), not on every dialogue change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [characterDeps, sceneDeps, variableDeps, settings, onUpdateDialogue, holderId, story]);
+    }, [characterDeps, sceneDeps, settings, holderId]); 
 
     return <div id={holderId} className="prose text-foreground" />;
 };

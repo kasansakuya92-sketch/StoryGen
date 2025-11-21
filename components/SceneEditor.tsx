@@ -1,30 +1,27 @@
-
-
-
 import React, { useCallback, useState } from 'react';
-import { Scene, ScenesData, CharactersData, DialogueItem, DialogueLength, Story, Project } from '../types.ts';
+import { Scene, ScenesData, CharactersData, DialogueItem, DialogueLength } from '../types.ts';
+import VeoGenerationModal from './VeoGenerationModal.tsx';
 import DialogueEditor from './editorjs/Editor.tsx';
 import { useSettings } from '../contexts/SettingsContext.tsx';
 import AIGenerateSceneDialogueButton from './AIGenerateSceneDialogueButton.tsx';
-import AIIcon from './icons/AIIcon.tsx';
+import MilestoneSlider, { SliderOption } from './MilestoneSlider.tsx';
 
 // Prop Interfaces
 interface SceneEditorProps {
   scene: Scene;
-  story: Story;
   scenes: ScenesData;
   characters: CharactersData;
   onUpdateScene: (sceneId: string, updatedScene: Partial<Scene>) => void;
-  project: Project; // Added Project to allow cross-story linking
 }
 
 const commonFormElement = "w-full bg-card/70 border border-border rounded-md p-2 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none";
 
-const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, characters, onUpdateScene, project }) => {
+const SceneEditor: React.FC<SceneEditorProps> = ({ scene, scenes, characters, onUpdateScene }) => {
+  const [isVeoModalOpen, setIsVeoModalOpen] = useState(false);
   const { settings } = useSettings();
   
+  // State for AI Dialogue Generation panel
   const [isAiDialoguePanelOpen, setIsAiDialoguePanelOpen] = useState(false);
-
   const [aiDialogueLength, setAiDialogueLength] = useState<DialogueLength>('Short');
   const [aiUseContinuity, setAiUseContinuity] = useState(true);
   const [aiCustomPrompt, setAiCustomPrompt] = useState('');
@@ -32,6 +29,12 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, charact
   const handleDialogueUpdate = useCallback((newDialogue: DialogueItem[]) => {
       onUpdateScene(scene.id, { dialogue: newDialogue });
   }, [onUpdateScene, scene.id]);
+
+  const dialogueLengthOptions: SliderOption[] = [
+      { value: 'Short', label: 'Concise', description: '3-5 lines' },
+      { value: 'Medium', label: 'Balanced', description: '6-8 lines' },
+      { value: 'Long', label: 'Detailed', description: '9-12 lines' }
+  ];
 
   return (
     <main className="flex-grow bg-transparent overflow-y-auto p-4 space-y-4">
@@ -55,14 +58,27 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, charact
           />
         </div>
         
+        {/* AI Media Generation Section */}
+        <div className="border-t border-border pt-4 mt-4">
+            <h3 className="text-lg font-bold mb-2">Scene Media Generation</h3>
+              <button
+                onClick={() => setIsVeoModalOpen(true)}
+                className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-sm hover:bg-primary/90 flex items-center gap-2"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2-2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 001.553.832l3-2a1 1 0 000-1.664l-3-2z" />
+                </svg>
+                Generate Scene Video with AI
+            </button>
+        </div>
+
+        {/* Dialogue Block Editor */}
         <div className="space-y-2 pt-4 border-t border-border mt-4">
           <h3 className="text-lg font-bold">Dialogue</h3>
           <div className="bg-card/80 backdrop-blur-sm border border-border p-2 rounded prose max-w-none prose-p:my-1 prose-headings:my-2">
              <DialogueEditor
-                key={scene.id}
+                key={scene.id} // Re-initialize editor when scene changes
                 scene={scene}
-                story={story}
-                project={project}
                 scenes={scenes}
                 characters={characters}
                 onUpdateDialogue={handleDialogueUpdate}
@@ -71,15 +87,13 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, charact
           </div>
         </div>
         
+        {/* New AI Dialogue Generation Panel */}
         <div className="border-t border-border pt-4 mt-4">
             <button
             onClick={() => setIsAiDialoguePanelOpen(prev => !prev)}
             className="w-full flex justify-between items-center text-left"
             >
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <AIIcon className="w-5 h-5 text-primary" />
-              AI Dialogue Extension
-            </h3>
+            <h3 className="text-lg font-bold">AI Dialogue Extension</h3>
             <span className="font-bold">{isAiDialoguePanelOpen ? '−' : '+'}</span>
             </button>
             {isAiDialoguePanelOpen && (
@@ -89,20 +103,16 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, charact
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-sm font-bold text-foreground/80 mb-1">Dialogue Detail</label>
-                    <select
-                        value={aiDialogueLength}
-                        onChange={(e) => setAiDialogueLength(e.target.value as DialogueLength)}
-                        className={commonFormElement}
-                    >
-                        <option value="Short">Short (3-5 lines)</option>
-                        <option value="Medium">Medium (6-8 lines)</option>
-                        <option value="Long">Long (9-12 lines)</option>
-                    </select>
+                    <MilestoneSlider 
+                        label="Dialogue Detail" 
+                        value={aiDialogueLength} 
+                        onChange={setAiDialogueLength} 
+                        options={dialogueLengthOptions} 
+                    />
                 </div>
                 <div>
                     <label className="block text-sm font-bold text-foreground/80 mb-1">Context</label>
-                    <div className="flex items-center h-full">
+                    <div className="flex items-center h-full pt-2">
                     <input
                         type="checkbox"
                         id="ai-continuity"
@@ -127,7 +137,7 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, charact
                 </div>
                 <AIGenerateSceneDialogueButton
                 scene={scene}
-                story={story}
+                scenes={scenes}
                 characters={characters}
                 onUpdateScene={onUpdateScene}
                 dialogueLength={aiDialogueLength}
@@ -137,6 +147,14 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, story, scenes, charact
             </div>
             )}
         </div>
+        
+        {isVeoModalOpen && (
+          <VeoGenerationModal
+              scene={scene}
+              characters={characters}
+              onClose={() => setIsVeoModalOpen(false)}
+          />
+        )}
       </div>
     </main>
   );

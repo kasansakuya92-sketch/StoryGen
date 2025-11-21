@@ -24,12 +24,8 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     try {
       const savedSettings = localStorage.getItem('vn_settings');
       if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
         // Merge saved settings with defaults to prevent missing keys if new settings are added
-        return {
-           ...defaultSettings,
-           ...parsed,
-        };
+        return { ...defaultSettings, ...JSON.parse(savedSettings) };
       }
     } catch (error) {
       console.error("Could not parse settings from localStorage", error);
@@ -37,6 +33,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     return defaultSettings;
   });
 
+  // FIX: Corrected the malformed try-catch block which was causing parsing errors.
   useEffect(() => {
     try {
       localStorage.setItem('vn_settings', JSON.stringify(settings));
@@ -46,10 +43,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   }, [settings]);
 
   const updateSettings = (newSettings: Partial<Settings>) => {
-    setSettings(prev => ({ 
-      ...prev,
-      ...newSettings,
-    }));
+    setSettings(prev => ({ ...prev, ...newSettings }));
   };
 
   return (

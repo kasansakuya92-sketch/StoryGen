@@ -1,21 +1,19 @@
-
 import React, { useState } from 'react';
-import { Scene, ScenesData, CharactersData, DialogueLength, DialogueItem, Story } from '../types.ts';
+import { Scene, ScenesData, CharactersData, DialogueLength, DialogueItem } from '../types.ts';
 import { generateDialogueForScene } from '../utils/ai.ts';
 import { useSettings } from '../contexts/SettingsContext.tsx';
-import AIIcon from './icons/AIIcon.tsx';
 
 interface AIGenerateSceneDialogueButtonProps {
   scene: Scene;
-  story: Story; // Changed to accept the full story object
+  scenes: ScenesData;
+  characters: CharactersData;
   onUpdateScene: (sceneId: string, updatedScene: Partial<Scene>) => void;
   dialogueLength: DialogueLength;
   useContinuity: boolean;
   aiPrompt: string;
-  characters: CharactersData; // Added
 }
 
-const AIGenerateSceneDialogueButton: React.FC<AIGenerateSceneDialogueButtonProps> = ({ scene, story, onUpdateScene, dialogueLength, useContinuity, aiPrompt, characters }) => {
+const AIGenerateSceneDialogueButton: React.FC<AIGenerateSceneDialogueButtonProps> = ({ scene, scenes, characters, onUpdateScene, dialogueLength, useContinuity, aiPrompt }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { settings } = useSettings();
@@ -25,7 +23,7 @@ const AIGenerateSceneDialogueButton: React.FC<AIGenerateSceneDialogueButtonProps
     setError(null);
     try {
       // We only want to generate text lines to extend the dialogue, not create a new outcome.
-      const newDialogueItems = await generateDialogueForScene(settings, story, scene.id, characters, dialogueLength, useContinuity, 'text_only', aiPrompt);
+      const newDialogueItems = await generateDialogueForScene(settings, scene, scenes, characters, dialogueLength, useContinuity, 'text_only', aiPrompt);
       
       if (Array.isArray(newDialogueItems)) {
          // Find if an outcome block already exists and preserve it.
@@ -71,7 +69,7 @@ const AIGenerateSceneDialogueButton: React.FC<AIGenerateSceneDialogueButtonProps
         className="w-full px-4 py-2 bg-primary text-primary-foreground font-semibold text-sm rounded-md shadow-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         title={settings.aiProvider === 'local' && !settings.localModelUrl ? 'Please set the Local Model URL in settings.' : ''}
       >
-        {isLoading ? 'Generating...' : <><AIIcon className="w-4 h-4" /> Generate & Append Dialogue</>}
+        {isLoading ? 'Generating...' : '✨ Generate & Append Dialogue'}
       </button>
       {error && <p className="text-destructive text-xs mt-2">{error}</p>}
     </div>

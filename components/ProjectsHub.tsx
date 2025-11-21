@@ -1,4 +1,5 @@
 import React from 'react';
+// FIX: Add `Story` to imports to be used for explicit typing.
 import { ProjectsData, Project, Story } from '../types.ts';
 import ThemeToggle from './ThemeToggle.tsx';
 
@@ -27,6 +28,8 @@ const TrashIcon = () => (
 
 const ProjectCard: React.FC<{ project: Project; onPlay: () => void; onEdit: () => void; onDelete: (projectId: string) => void; }> = ({ project, onPlay, onEdit, onDelete }) => {
     const storyCount = Object.keys(project.stories).length;
+    // FIX: Add explicit type `Story` to the `story` variable to resolve TypeScript errors.
+    // FIX: Add explicit type for the accumulator to resolve type inference issue.
     const sceneCount = Object.values(project.stories).reduce((acc: number, story: Story) => acc + Object.keys(story.scenes).length, 0);
 
     return (
@@ -89,6 +92,7 @@ const ProjectsHub: React.FC<ProjectsHubProps> = ({ projects, onOpenEditor, onPla
                 <p className="text-lg text-foreground/70 mt-2">Select a project to play or edit, or start a new one.</p>
             </header>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {/* FIX: Add explicit type `Project` to the `project` variable to resolve TypeScript errors. */}
                 {Object.values(projects).map((project: Project) => (
                     <ProjectCard 
                         key={project.id} 

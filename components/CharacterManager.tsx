@@ -1,18 +1,19 @@
+
 import React, { useState, useEffect } from 'react';
-import { CharactersData, Character, Sprite } from '../types.ts';
+import { CharactersData, Character, Sprite, Project, Story } from '../types.ts';
 import { useSettings } from '../contexts/SettingsContext.tsx';
 import { generateCharacterDetails } from '../utils/ai.ts';
-import AIIcon from './icons/AIIcon.tsx';
 
 
 interface CharacterManagerProps {
   characters: CharactersData;
   onUpdateCharacters: (characters: CharactersData) => void;
   onClose: () => void;
+  activeProject: Project | null;
 }
 
 const commonInputClass = "mt-1 block w-full bg-card/50 border border-border rounded-md p-2 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none";
-type View = 'editor' | 'generator';
+type View = 'editor' | 'generator' | 'import';
 
 const AICharacterGenerator: React.FC<{
     onCharacterGenerated: (charData: Omit<Character, 'id' | 'sprites' | 'defaultSpriteId'>) => void
@@ -44,7 +45,7 @@ const AICharacterGenerator: React.FC<{
     return (
         <div className="p-4 flex flex-col h-full">
             <h3 className="text-lg font-bold">AI Character Generator</h3>
-            <p className="text-sm text-foreground/70 mt-1 mb-4">Describe the character you want to create. The AI will generate their name, appearance, and talking style.</p>
+            <p className="text-sm text-foreground/70 mt-1 mb-4">Describe the character you want to create. The AI will generate their name, appearance, talking style, and gender.</p>
             <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
@@ -55,10 +56,10 @@ const AICharacterGenerator: React.FC<{
             <button
                 onClick={handleGenerate}
                 disabled={isLoading || (settings.aiProvider === 'local' && !settings.localModelUrl)}
-                className="mt-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-sm hover:bg-primary/90 disabled:opacity-50 w-full flex items-center justify-center gap-2"
+                className="mt-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-sm hover:bg-primary/90 disabled:opacity-50 w-full"
                 title={settings.aiProvider === 'local' && !settings.localModelUrl ? 'Please set the Local Model URL in settings.' : ''}
             >
-                {isLoading ? 'Generating...' : <><AIIcon className="w-4 h-4" /> Generate Character</>}
+                {isLoading ? 'Generating...' : '✨ Generate Character'}
             </button>
             {error && <p className="text-destructive text-xs mt-2">{error}</p>}
         </div>
@@ -66,7 +67,7 @@ const AICharacterGenerator: React.FC<{
 };
 
 
-const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdateCharacters, onClose }) => {
+const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdateCharacters, onClose, activeProject }) => {
   const [selectedCharId, setSelectedCharId] = useState<string | null>(Object.keys(characters)[0] || null);
   const [view, setView] = useState<View>('editor');
   const [generatedChar, setGeneratedChar] = useState<Omit<Character, 'id' | 'sprites' | 'defaultSpriteId'> | null>(null);
@@ -75,10 +76,10 @@ const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdat
 
   // If the selected character is deleted externally, select the first one available
   useEffect(() => {
-    if (selectedCharId && !characters[selectedCharId]) {
+    if (selectedCharId && !characters[selectedCharId] && view === 'editor') {
       setSelectedCharId(Object.keys(characters)[0] || null);
     }
-  }, [characters, selectedCharId]);
+  }, [characters, selectedCharId, view]);
 
   const handleUpdateCharacter = (charId: string, field: keyof Character, value: any) => {
     const newCharacters = { ...characters };
@@ -121,7 +122,8 @@ const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdat
         defaultSpriteId: 'normal',
         sprites: [{ id: 'normal', url: '' }],
         talkingStyle: '',
-        appearance: ''
+        appearance: '',
+        gender: 'female' // Default
     };
     const newCharacters = { ...characters, [newId]: newChar };
     onUpdateCharacters(newCharacters);
@@ -149,6 +151,11 @@ const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdat
       setSelectedCharId(null);
   };
 
+  const handleSwitchToImport = () => {
+      setView('import');
+      setSelectedCharId(null);
+  };
+
   const handleCharacterGenerated = (charData: Omit<Character, 'id' | 'sprites' | 'defaultSpriteId'>) => {
     setGeneratedChar(charData);
   };
@@ -161,6 +168,7 @@ const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdat
           id: newId,
           defaultSpriteId: 'normal',
           sprites: [{ id: 'normal', url: `https://picsum.photos/seed/${newId}/600/800` }],
+          gender: (generatedChar.gender as any) || 'neutral' // Ensure gender is passed
       };
       const newCharacters = { ...characters, [newId]: newChar };
       onUpdateCharacters(newCharacters);
@@ -168,18 +176,43 @@ const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdat
       setSelectedCharId(newId);
       setView('editor');
   };
+  
+  const handleImportCharacter = (char: Character) => {
+      if (characters[char.id]) {
+          alert("A character with this ID already exists in this story.");
+          return;
+      }
+      const newCharacters = { ...characters, [char.id]: char };
+      onUpdateCharacters(newCharacters);
+      alert(`Imported ${char.name}!`);
+  };
 
   const renderEditorView = () => (
     selectedChar ? (
       <div className="space-y-4 p-4">
-        <div>
-          <label className="text-sm font-medium">Character Name</label>
-          <input 
-            type="text"
-            value={selectedChar.name}
-            onChange={(e) => handleUpdateCharacter(selectedChar.id, 'name', e.target.value)}
-            className={commonInputClass}
-          />
+        <div className="grid grid-cols-2 gap-4">
+            <div>
+                <label className="text-sm font-medium">Character Name</label>
+                <input 
+                    type="text"
+                    value={selectedChar.name}
+                    onChange={(e) => handleUpdateCharacter(selectedChar.id, 'name', e.target.value)}
+                    className={commonInputClass}
+                />
+            </div>
+            <div>
+                <label className="text-sm font-medium">Gender</label>
+                <select 
+                    value={selectedChar.gender || 'female'}
+                    onChange={(e) => handleUpdateCharacter(selectedChar.id, 'gender', e.target.value)}
+                    className={commonInputClass}
+                >
+                    <option value="female">Female (Pink)</option>
+                    <option value="male">Male (Blue)</option>
+                    <option value="trans">Trans (Purple)</option>
+                    <option value="neutral">Neutral (Black)</option>
+                </select>
+            </div>
         </div>
          <div>
           <label className="text-sm font-medium">Appearance Description</label>
@@ -243,9 +276,15 @@ const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdat
     generatedChar ? (
       <div className="p-4 space-y-4">
           <h3 className="text-lg font-bold">Generated Character</h3>
-          <div>
-            <label className="text-sm font-medium text-foreground/80">Name</label>
-            <p className="p-2 bg-card/50 rounded-md">{generatedChar.name}</p>
+          <div className="flex gap-4">
+            <div className="flex-1">
+                <label className="text-sm font-medium text-foreground/80">Name</label>
+                <p className="p-2 bg-card/50 rounded-md">{generatedChar.name}</p>
+            </div>
+             <div className="flex-1">
+                <label className="text-sm font-medium text-foreground/80">Gender</label>
+                <p className="p-2 bg-card/50 rounded-md capitalize">{generatedChar.gender || 'Neutral'}</p>
+            </div>
           </div>
           <div>
             <label className="text-sm font-medium text-foreground/80">Appearance</label>
@@ -268,6 +307,48 @@ const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdat
       <AICharacterGenerator onCharacterGenerated={handleCharacterGenerated} />
     )
   );
+
+  const renderImportView = () => {
+      if (!activeProject) return <div className="p-4 text-center">No active project found.</div>;
+      
+      const existingIds = new Set(Object.keys(characters));
+      const importableCharacters: Character[] = [];
+      
+      Object.values(activeProject.stories).forEach((story: Story) => {
+          Object.values(story.characters).forEach((char: Character) => {
+              if (!existingIds.has(char.id)) {
+                  // Check if we already added this ID to importables (duplicate across stories?)
+                  if (!importableCharacters.some(c => c.id === char.id)) {
+                      importableCharacters.push(char);
+                  }
+              }
+          });
+      });
+
+      if (importableCharacters.length === 0) {
+          return <div className="p-4 text-center text-foreground/70">No other characters found in this project to import.</div>;
+      }
+
+      return (
+          <div className="p-4 space-y-2">
+              <h3 className="text-lg font-bold mb-4">Import from Project</h3>
+              {importableCharacters.map(char => (
+                  <div key={char.id} className="flex items-center justify-between bg-card/50 p-3 rounded border border-border/50">
+                      <div>
+                          <p className="font-semibold">{char.name}</p>
+                          <p className="text-xs text-foreground/70">{char.gender} • {char.sprites.length} sprites</p>
+                      </div>
+                      <button 
+                        onClick={() => handleImportCharacter(char)}
+                        className="px-3 py-1 bg-secondary text-secondary-foreground text-xs font-bold rounded hover:bg-secondary/90"
+                      >
+                          Import
+                      </button>
+                  </div>
+              ))}
+          </div>
+      );
+  };
 
   return (
     <div className="fixed inset-0 bg-onyx/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -292,8 +373,11 @@ const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdat
               ))}
              </div>
              <div className="p-2 border-t border-border space-y-2">
-                 <button onClick={handleSwitchToGenerator} className={`w-full text-center p-2 text-sm font-semibold rounded flex items-center justify-center gap-2 ${view === 'generator' ? 'bg-primary/20 text-primary' : 'text-primary hover:bg-primary/10'}`}>
-                    <AIIcon className="w-4 h-4" /> AI Character
+                 <button onClick={handleSwitchToGenerator} className={`w-full text-center p-2 text-sm font-semibold rounded ${view === 'generator' ? 'bg-primary/20 text-primary' : 'text-primary hover:bg-primary/10'}`}>
+                    ✨ AI Character
+                </button>
+                 <button onClick={handleSwitchToImport} className={`w-full text-center p-2 text-sm font-semibold rounded ${view === 'import' ? 'bg-secondary/20 text-foreground' : 'text-foreground hover:bg-secondary/10'}`}>
+                    Import from Project
                 </button>
                 <button onClick={handleAddCharacter} className="w-full text-center p-2 text-sm font-semibold text-primary hover:bg-primary/10 rounded">
                     + New Character
@@ -303,7 +387,7 @@ const CharacterManager: React.FC<CharacterManagerProps> = ({ characters, onUpdat
 
           {/* Main Content */}
           <div className="w-3/4 overflow-y-auto bg-transparent">
-            {view === 'editor' ? renderEditorView() : renderGeneratorView()}
+            {view === 'editor' ? renderEditorView() : view === 'generator' ? renderGeneratorView() : renderImportView()}
           </div>
         </div>
       </div>

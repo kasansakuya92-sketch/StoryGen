@@ -3,7 +3,6 @@ import { useSettings } from '../contexts/SettingsContext.tsx';
 import { exportProjectAsJson } from '../utils/export.ts';
 import { Settings, ProjectsData } from '../types.ts';
 import { testLocalAIEndpoint } from '../utils/localAI.ts';
-import SystemLogModal from './SystemLogModal.tsx';
 
 
 interface SettingsScreenProps {
@@ -24,10 +23,9 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, projects, onRes
   const { settings, updateSettings } = useSettings();
   const [localAIStatus, setLocalAIStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [localAIStatusMessage, setLocalAIStatusMessage] = useState<string>('');
-  const [isLogOpen, setIsLogOpen] = useState(false);
 
 
-  const handleSettingChange = (key: keyof Settings, value: any) => {
+  const handleSettingChange = (key: keyof Settings, value: string) => {
     updateSettings({ [key]: value });
   };
 
@@ -75,7 +73,8 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, projects, onRes
   };
 
   const statusClasses = {
-    idle: { container: 'hidden', dot: 'bg-transparent', text: '' },
+    // FIX: Add `dot` and `text` properties to the `idle` state to prevent TypeScript errors. Since the container is hidden when idle, this has no visual impact.
+    idle: { container: 'hidden', dot: '', text: '' },
     testing: {
         container: 'bg-secondary/20',
         dot: 'bg-secondary animate-pulse',
@@ -151,7 +150,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, projects, onRes
               </div>
             )}
           </SettingsCard>
-          
+
           <SettingsCard title="Appearance" description="Customize the look and feel of the application.">
             <div>
               <label htmlFor="theme" className="block text-sm font-medium text-foreground/80">Theme</label>
@@ -197,22 +196,16 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, projects, onRes
           </SettingsCard>
           
            <SettingsCard title="Data Management" description="Export your work or reset the application.">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <button 
-                        onClick={() => setIsLogOpen(true)}
-                        className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-semibold rounded-md shadow-sm hover:bg-secondary/90"
-                    >
-                        View System Log
-                    </button>
+                <div className="flex flex-col sm:flex-row gap-4">
                     <button 
                         onClick={handleExportAll}
-                        className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-sm hover:bg-primary/90"
+                        className="flex-1 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-sm hover:bg-primary/90"
                     >
                         Export All Projects
                     </button>
                     <button 
                         onClick={handleResetData}
-                        className="px-4 py-2 bg-destructive text-destructive-foreground text-sm font-semibold rounded-md shadow-sm hover:bg-destructive/90"
+                        className="flex-1 px-4 py-2 bg-destructive text-destructive-foreground text-sm font-semibold rounded-md shadow-sm hover:bg-destructive/90"
                     >
                         Reset All Data
                     </button>
@@ -220,7 +213,6 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, projects, onRes
            </SettingsCard>
         </div>
       </div>
-      {isLogOpen && <SystemLogModal onClose={() => setIsLogOpen(false)} />}
     </div>
   );
 };

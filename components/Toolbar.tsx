@@ -1,21 +1,19 @@
 
-
-import React from 'react';
-import { exportProjectAsJson } from '../utils/export.ts';
-import { Project } from '../types.ts';
+import React, { useState, useRef, useEffect } from 'react';
+import { exportProjectAsJson, exportStoryAsLegacyJson, exportStoryAsTwee, importStoryFromTwee } from '../utils/export.ts';
+import { Project, Story, CharactersData } from '../types.ts';
 import ThemeToggle from './ThemeToggle.tsx';
-import AIIcon from './icons/AIIcon.tsx';
 
 interface ToolbarProps {
   activeProject: Project | null;
+  activeStory?: Story | null; // Added activeStory
   onToggleCharManager: () => void;
-  onToggleVarManager: () => void;
-  onToggleAssetManager: () => void;
-  editorMode: 'FORM' | 'NODE' | 'DOC';
+  editorMode: 'FORM' | 'NODE';
   onToggleEditorMode: () => void;
   onOpenStoryPlanner: () => void;
   onGoToHub: () => void;
   onGoToSettings: () => void;
+  onImportStory?: (story: Story, characters: CharactersData) => void;
 }
 
 const SettingsIcon = () => (
@@ -26,23 +24,73 @@ const SettingsIcon = () => (
 );
 
 
-const Toolbar: React.FC<ToolbarProps> = ({ activeProject, onToggleCharManager, onToggleVarManager, onToggleAssetManager, editorMode, onToggleEditorMode, onOpenStoryPlanner, onGoToHub, onGoToSettings }) => {
-  const handleExport = () => {
+const Toolbar: React.FC<ToolbarProps> = ({ activeProject, activeStory, onToggleCharManager, editorMode, onToggleEditorMode, onOpenStoryPlanner, onGoToHub, onGoToSettings, onImportStory }) => {
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportBackup = () => {
     if (activeProject) {
       exportProjectAsJson(activeProject);
-    } else {
-      alert("No active project to export.");
     }
+    setIsExportMenuOpen(false);
   };
 
-  const getNextViewName = () => {
-    if (editorMode === 'FORM') return 'Node View';
-    if (editorMode === 'NODE') return 'Doc View';
-    return 'Form View';
+  const handleExportLegacy = () => {
+      if (activeStory) {
+          exportStoryAsLegacyJson(activeStory);
+      } else {
+          alert("Please select a specific story to export for the legacy engine.");
+      }
+      setIsExportMenuOpen(false);
   };
+
+  const handleExportTwee = () => {
+      if (activeStory) {
+          exportStoryAsTwee(activeStory);
+      } else {
+          alert("Please select a specific story to export as Twee/SugarCube.");
+      }
+      setIsExportMenuOpen(false);
+  };
+
+  const handleImportTweeClick = () => {
+      fileInputRef.current?.click();
+      setIsExportMenuOpen(false);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !activeProject || !onImportStory) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+          const content = event.target?.result as string;
+          try {
+              const { story, characters } = importStoryFromTwee(content, activeProject.stories[Object.keys(activeProject.stories)[0]]?.characters || {});
+              onImportStory(story, characters);
+              alert("Story imported successfully!");
+          } catch (err) {
+              console.error(err);
+              alert("Failed to import Twee file. Please check the format.");
+          }
+      };
+      reader.readAsText(file);
+      e.target.value = ''; // Reset input
+  };
+
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+              setIsExportMenuOpen(false);
+          }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   
   return (
-    <header className="flex-shrink-0 h-14 bg-card/60 backdrop-blur-md border-b border-border flex items-center justify-between px-4">
+    <header className="flex-shrink-0 h-14 bg-card/60 backdrop-blur-md border-b border-border flex items-center justify-between px-4 z-30">
       <div className="flex items-center gap-4">
         <button onClick={onGoToHub} className="text-sm font-semibold text-foreground/80 hover:text-foreground">
           &larr; Back to Hub
@@ -52,20 +100,19 @@ const Toolbar: React.FC<ToolbarProps> = ({ activeProject, onToggleCharManager, o
       <div className="flex items-center gap-2 md:gap-3">
         <button
           onClick={onOpenStoryPlanner}
-          className="px-3 py-1.5 bg-primary text-primary-foreground text-xs rounded hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
+          className="px-3 py-1.5 bg-primary text-primary-foreground text-xs rounded hover:bg-primary/90 disabled:opacity-50"
           disabled={!activeProject}
           title="AI Story Planner"
         >
-          <AIIcon className="w-4 h-4" />
-          <span className="hidden sm:inline">AI Story Planner</span>
-           <span className="sm:hidden">AI</span>
+          <span className="hidden sm:inline">✨ AI Story Planner</span>
+           <span className="sm:hidden">✨ AI</span>
         </button>
         <button
           onClick={onToggleEditorMode}
           className="px-3 py-1.5 bg-secondary text-secondary-foreground text-xs rounded hover:bg-secondary/90"
           title="Toggle View"
         >
-          {getNextViewName()}
+          {editorMode === 'FORM' ? 'Node View' : 'Form View'}
         </button>
         <button
           onClick={onToggleCharManager}
@@ -76,32 +123,55 @@ const Toolbar: React.FC<ToolbarProps> = ({ activeProject, onToggleCharManager, o
            <span className="hidden sm:inline">Characters</span>
            <span className="sm:hidden">Chars</span>
         </button>
-        <button
-          onClick={onToggleVarManager}
-          className="px-3 py-1.5 bg-secondary text-secondary-foreground text-xs rounded hover:bg-secondary/90 disabled:opacity-50"
-          disabled={!activeProject}
-          title="Manage Variables"
-        >
-           <span className="hidden sm:inline">Variables</span>
-           <span className="sm:hidden">Vars</span>
-        </button>
-        <button
-          onClick={onToggleAssetManager}
-          className="px-3 py-1.5 bg-secondary text-secondary-foreground text-xs rounded hover:bg-secondary/90 disabled:opacity-50"
-          disabled={!activeProject}
-          title="Manage Backgrounds"
-        >
-           <span className="hidden sm:inline">Assets</span>
-           <span className="sm:hidden">Img</span>
-        </button>
-        <button
-          onClick={handleExport}
-          className="px-3 py-1.5 bg-primary text-primary-foreground text-xs rounded hover:bg-primary/90 disabled:opacity-50"
-          disabled={!activeProject}
-          title="Export Project as JSON"
-        >
-          Export
-        </button>
+        
+        {/* Export Dropdown */}
+        <div className="relative" ref={exportMenuRef}>
+            <button
+            onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+            className="px-3 py-1.5 bg-primary text-primary-foreground text-xs rounded hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1"
+            disabled={!activeProject}
+            title="Export/Import Options"
+            >
+            File <span className="text-[10px]">▼</span>
+            </button>
+            {isExportMenuOpen && (
+                <div className="absolute top-full right-0 mt-1 w-48 bg-card border border-border rounded shadow-xl overflow-hidden flex flex-col z-50">
+                    <button 
+                        onClick={handleExportBackup} 
+                        className="px-4 py-2 text-left text-sm hover:bg-secondary/30 text-foreground"
+                    >
+                        Export Project (.json)
+                    </button>
+                    <button 
+                        onClick={handleExportLegacy} 
+                        className="px-4 py-2 text-left text-sm hover:bg-secondary/30 text-foreground border-t border-border/50"
+                    >
+                        Export Legacy Engine
+                    </button>
+                    <button 
+                        onClick={handleExportTwee} 
+                        className="px-4 py-2 text-left text-sm hover:bg-secondary/30 text-foreground border-t border-border/50"
+                    >
+                        Export Twee
+                    </button>
+                     <button 
+                        onClick={handleImportTweeClick} 
+                        className="px-4 py-2 text-left text-sm hover:bg-secondary/30 text-foreground border-t border-border/50"
+                    >
+                        Import Twee
+                    </button>
+                </div>
+            )}
+        </div>
+        
+        <input 
+            type="file" 
+            accept=".twee,.tw,.txt" 
+            ref={fileInputRef} 
+            className="hidden" 
+            onChange={handleFileChange}
+        />
+
         <div className="flex items-center gap-1">
           <button onClick={onGoToSettings} className="p-1.5 text-foreground/70 hover:text-foreground rounded-full hover:bg-secondary/50" title="Settings">
               <SettingsIcon />
