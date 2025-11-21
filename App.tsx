@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useEffect } from 'react';
 import GameScreen from './components/GameScreen.tsx';
 import StartScreen from './components/StartScreen.tsx';
@@ -11,6 +12,7 @@ import NodeEditorView from './components/NodeEditorView.tsx';
 import AIStoryPlanner from './components/AIStoryPlanner.tsx';
 import ProjectsHub from './components/ProjectsHub.tsx';
 import SettingsScreen from './components/SettingsScreen.tsx';
+import VariableManager from './components/VariableManager.tsx';
 import { initialProjectsData } from './story.ts';
 import { Scene, ScenesData, CharactersData, ProjectsData, Story, AIGeneratedScene, DialogueItem, SceneCharacter } from './types.ts';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext.tsx';
@@ -56,6 +58,7 @@ const AppContent: React.FC = () => {
   const [editorMode, setEditorMode] = useState<EditorMode>('FORM');
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   const [isCharManagerOpen, setIsCharManagerOpen] = useState(false);
+  const [isVariableManagerOpen, setIsVariableManagerOpen] = useState(false);
   const [isPlannerOpen, setIsPlannerOpen] = useState(false);
   const [isExplorerCollapsed, setIsExplorerCollapsed] = useState(false);
 
@@ -255,7 +258,8 @@ const AppContent: React.FC = () => {
     const newProject = {
         id: newId,
         name: 'New Project',
-        stories: {}
+        stories: {},
+        variables: []
     };
     setProjects(prev => ({
         ...prev,
@@ -298,6 +302,18 @@ const AppContent: React.FC = () => {
       };
     });
   };
+  
+  const handleUpdateVariables = useCallback((variables: string[]) => {
+      if(!activeProjectId) return;
+      setProjects(prev => {
+          const project = prev[activeProjectId];
+          if(!project) return prev;
+          return {
+              ...prev,
+              [activeProjectId]: { ...project, variables }
+          };
+      });
+  }, [activeProjectId]);
 
   const handleUpdateStoryName = (storyId: string, projectId: string, newName: string) => {
     if (!newName.trim()) return;
@@ -453,12 +469,9 @@ const AppContent: React.FC = () => {
           if (!project) return prev;
 
           // Merge characters
-          // We update all stories in the project to include these new characters if they don't exist
-          // But typically characters are per story in this data model, but referenced in scenes.
-          // Wait, Story has `characters`. We should update the imported story's characters.
           const mergedStory = {
               ...importedStory,
-              characters: { ...newCharacters } // The import logic already merged existing ones
+              characters: { ...newCharacters } 
           };
 
           const newStories = { ...project.stories, [importedStory.id]: mergedStory };
@@ -600,6 +613,7 @@ const AppContent: React.FC = () => {
         activeProject={activeProject}
         activeStory={activeStory}
         onToggleCharManager={() => setIsCharManagerOpen(true)}
+        onToggleVariableManager={() => setIsVariableManagerOpen(true)}
         editorMode={editorMode}
         onToggleEditorMode={() => setEditorMode(prev => prev === 'FORM' ? 'NODE' : 'FORM')}
         onOpenStoryPlanner={() => setIsPlannerOpen(true)}
@@ -635,6 +649,7 @@ const AppContent: React.FC = () => {
                 scene={selectedSceneForEditor}
                 scenes={activeScenes}
                 characters={activeCharacters}
+                variables={activeProject?.variables || []}
                 onUpdateScene={handleUpdateScene}
               />
             )}
@@ -662,6 +677,13 @@ const AppContent: React.FC = () => {
           onUpdateCharacters={handleUpdateCharacters}
           onClose={() => setIsCharManagerOpen(false)}
           activeProject={activeProject}
+        />
+      )}
+      {isVariableManagerOpen && activeProject && (
+        <VariableManager
+          variables={activeProject.variables || []}
+          onUpdateVariables={handleUpdateVariables}
+          onClose={() => setIsVariableManagerOpen(false)}
         />
       )}
       {isPlannerOpen && activeProject && (

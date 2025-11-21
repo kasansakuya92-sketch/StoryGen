@@ -1,4 +1,5 @@
 
+
 // types.ts
 
 export interface Sprite {
@@ -13,7 +14,7 @@ export interface Character {
   defaultSpriteId: string;
   talkingStyle: string;
   appearance: string;
-  gender?: 'male' | 'female' | 'trans' | 'neutral'; // Added for legacy engine support
+  gender?: 'male' | 'female' | 'trans' | 'neutral'; 
 }
 
 export interface CharactersData {
@@ -33,11 +34,19 @@ export interface TextLine {
   text: string;
 }
 
+export interface StatRequirement {
+  stat: string;
+  threshold: number;
+}
+
 export interface Choice {
   text: string;
   nextSceneId: string;
   nextStoryId?: string;
   embedOutcome?: boolean; // If true, the next scene is defined as a variable in the current passage
+  type?: 'transfer'; // Optional explicit type override
+  statRequirements?: StatRequirement[];
+  statChanges?: Record<string, number>;
 }
 
 export interface ChoiceLine {
@@ -49,6 +58,11 @@ export interface Transition {
   type: 'transition';
   nextSceneId: string;
   nextStoryId?: string;
+}
+
+export interface TransferLine {
+  type: 'transfer';
+  nextSceneId: string;
 }
 
 export interface EndStory {
@@ -78,7 +92,7 @@ export interface AIPromptLine {
   error?: string | null;
 }
 
-export type DialogueItem = TextLine | ChoiceLine | Transition | EndStory | AIPromptLine | ImageLine | VideoLine;
+export type DialogueItem = TextLine | ChoiceLine | Transition | TransferLine | EndStory | AIPromptLine | ImageLine | VideoLine;
 
 
 export interface Scene {
@@ -109,6 +123,7 @@ export interface Project {
     stories: {
         [storyId: string]: Story;
     };
+    variables?: string[]; // Global list of variable names for this project
 }
 
 export interface ProjectsData {

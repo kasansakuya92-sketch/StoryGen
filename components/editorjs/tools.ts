@@ -1,5 +1,6 @@
 
-import { Character, CharactersData, Choice, Scene, ScenesData, DialogueLength, AIPromptLine } from '../../types.ts';
+
+import { Character, CharactersData, Choice, Scene, ScenesData, DialogueLength, AIPromptLine, StatRequirement } from '../../types.ts';
 
 const commonInputClass = "bg-card/80 border-border rounded p-1 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none w-full";
 const commonSelectClass = "bg-card/80 border-border rounded p-1 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none";
@@ -154,15 +155,17 @@ export class TextTool {
 export class ChoiceTool {
     private data: { choices: Choice[] };
     private scenes: ScenesData;
+    private variables: string[];
     private wrapper: HTMLDivElement | null = null;
     private choicesContainer: HTMLDivElement | null = null;
     
     static get isInline() { return false; }
     static get toolbox() { return { title: 'Choice', icon: '❔' }; }
 
-    constructor({ data, config }: { data: { choices: Choice[] }, config: { scenes: ScenesData }}) {
+    constructor({ data, config }: { data: { choices: Choice[] }, config: { scenes: ScenesData, variables?: string[] }}) {
         this.data = { choices: data.choices || [{ text: '', nextSceneId: '' }] };
         this.scenes = config.scenes;
+        this.variables = config.variables || [];
     }
 
     render() {
@@ -170,7 +173,7 @@ export class ChoiceTool {
         this.wrapper.className = 'pl-4 border-l-2 border-border/50 space-y-2 p-2';
 
         this.choicesContainer = document.createElement('div');
-        this.choicesContainer.className = 'space-y-2';
+        this.choicesContainer.className = 'space-y-4';
         this.data.choices.forEach(choice => this.addChoiceRow(choice));
         
         const addButton = document.createElement('button');
@@ -187,8 +190,12 @@ export class ChoiceTool {
 
     addChoiceRow(choice: Choice) {
         if (!this.choicesContainer) return;
+        const rowContainer = document.createElement('div');
+        rowContainer.className = "bg-card/30 p-2 rounded border border-border/30";
+        rowContainer.setAttribute('data-choice-row', 'true'); // Data attribute for robust selection
+        
         const row = document.createElement('div');
-        row.className = 'flex gap-2 items-center';
+        row.className = 'flex gap-2 items-center mb-2';
 
         const textInput = document.createElement('input');
         textInput.type = 'text';
@@ -210,49 +217,212 @@ export class ChoiceTool {
 
         // Embed Toggle
         const embedContainer = document.createElement('div');
-        embedContainer.className = "flex items-center gap-1 text-xs";
-        embedContainer.title = "Embed outcome as a variable (instead of jumping to a new passage)";
-        
+        embedContainer.className = "flex items-center gap-1 text-xs ml-1";
+        embedContainer.title = "Embed outcome as a variable";
         const embedCheckbox = document.createElement('input');
         embedCheckbox.type = 'checkbox';
         embedCheckbox.className = 'h-3 w-3 rounded border-border';
         embedCheckbox.checked = !!choice.embedOutcome;
-        embedCheckbox.tabIndex = -1;
-        
         const embedLabel = document.createElement('span');
         embedLabel.innerText = 'Embed';
         embedLabel.className = "text-foreground/70";
-
         embedContainer.appendChild(embedCheckbox);
         embedContainer.appendChild(embedLabel);
+
+        // Transfer Toggle
+        const transferContainer = document.createElement('div');
+        transferContainer.className = "flex items-center gap-1 text-xs ml-2";
+        transferContainer.title = "Export as Transfer type";
+        const transferCheckbox = document.createElement('input');
+        transferCheckbox.type = 'checkbox';
+        transferCheckbox.className = 'h-3 w-3 rounded border-border';
+        transferCheckbox.checked = choice.type === 'transfer';
+        const transferLabel = document.createElement('span');
+        transferLabel.innerText = 'Transfer';
+        transferLabel.className = "text-foreground/70";
+        transferContainer.appendChild(transferCheckbox);
+        transferContainer.appendChild(transferLabel);
+
+        // Toggle logic block
+        const toggleLogicBtn = document.createElement('button');
+        toggleLogicBtn.type = 'button';
+        toggleLogicBtn.innerText = 'Logic';
+        toggleLogicBtn.className = 'text-xs bg-secondary/70 text-secondary-foreground px-2 py-1 rounded hover:bg-secondary/90 ml-2';
+        
+        const logicContainer = document.createElement('div');
+        logicContainer.className = 'hidden mt-2 p-2 bg-background/50 rounded text-xs border border-border/20';
+        
+        toggleLogicBtn.onclick = () => {
+            logicContainer.classList.toggle('hidden');
+        };
 
         const deleteButton = document.createElement('button');
         deleteButton.type = 'button';
         deleteButton.innerHTML = '&times;';
         deleteButton.className = 'text-destructive/70 hover:text-destructive font-bold text-xl ml-2';
-        deleteButton.onclick = () => row.remove();
+        deleteButton.onclick = () => rowContainer.remove();
         deleteButton.tabIndex = -1;
 
         row.appendChild(textInput);
         row.appendChild(sceneSelect);
         row.appendChild(embedContainer);
+        row.appendChild(transferContainer);
+        row.appendChild(toggleLogicBtn);
         row.appendChild(deleteButton);
-        this.choicesContainer.appendChild(row);
+        rowContainer.appendChild(row);
+        rowContainer.appendChild(logicContainer);
+
+        // --- Logic Builder ---
+        
+        // 1. Requirements
+        const reqTitle = document.createElement('div');
+        reqTitle.className = "font-bold mb-1 flex justify-between items-center";
+        reqTitle.innerHTML = `<span>Requirements</span> <button type="button" class="${commonButtonClass}">+</button>`;
+        const reqList = document.createElement('div');
+        reqList.className = "space-y-1 mb-2";
+        reqList.setAttribute('data-req-list', 'true');
+        
+        const renderReq = (r?: StatRequirement) => {
+             const div = document.createElement('div');
+             div.className = "flex gap-1 items-center";
+             div.setAttribute('data-req-item', 'true');
+             
+             const statSelect = document.createElement('select');
+             statSelect.className = "bg-background border border-border rounded px-1 py-0.5 w-1/2";
+             if (this.variables.length === 0) {
+                 statSelect.add(new Option('No vars defined', ''));
+                 statSelect.disabled = true;
+             } else {
+                 this.variables.forEach(v => statSelect.add(new Option(v, v)));
+             }
+             if (r) statSelect.value = r.stat;
+
+             const opLabel = document.createElement('span');
+             opLabel.innerText = '≥'; // Currently assuming threshold implies >=
+
+             const valInput = document.createElement('input');
+             valInput.type = 'number';
+             valInput.className = "bg-background border border-border rounded px-1 py-0.5 w-1/4";
+             valInput.placeholder = "0";
+             if (r) valInput.value = r.threshold.toString();
+
+             const del = document.createElement('button');
+             del.innerHTML = '&times;';
+             del.className = "text-destructive ml-1";
+             del.onclick = () => div.remove();
+
+             div.appendChild(statSelect);
+             div.appendChild(opLabel);
+             div.appendChild(valInput);
+             div.appendChild(del);
+             reqList.appendChild(div);
+        };
+
+        (choice.statRequirements || []).forEach(r => renderReq(r));
+        (reqTitle.querySelector('button') as HTMLButtonElement).onclick = () => renderReq();
+
+        // 2. Changes
+        const chgTitle = document.createElement('div');
+        chgTitle.className = "font-bold mb-1 flex justify-between items-center";
+        chgTitle.innerHTML = `<span>Effects</span> <button type="button" class="${commonButtonClass}">+</button>`;
+        const chgList = document.createElement('div');
+        chgList.className = "space-y-1";
+        chgList.setAttribute('data-chg-list', 'true');
+
+         const renderChg = (stat?: string, val?: number) => {
+             const div = document.createElement('div');
+             div.className = "flex gap-1 items-center";
+             div.setAttribute('data-chg-item', 'true');
+
+             const statSelect = document.createElement('select');
+             statSelect.className = "bg-background border border-border rounded px-1 py-0.5 w-1/2";
+             if (this.variables.length === 0) {
+                 statSelect.add(new Option('No vars defined', ''));
+                 statSelect.disabled = true;
+             } else {
+                 this.variables.forEach(v => statSelect.add(new Option(v, v)));
+             }
+             if (stat) statSelect.value = stat;
+
+             const opLabel = document.createElement('span');
+             opLabel.innerText = '+='; 
+
+             const valInput = document.createElement('input');
+             valInput.type = 'number';
+             valInput.className = "bg-background border border-border rounded px-1 py-0.5 w-1/4";
+             valInput.placeholder = "0";
+             if (val !== undefined) valInput.value = val.toString();
+
+             const del = document.createElement('button');
+             del.innerHTML = '&times;';
+             del.className = "text-destructive ml-1";
+             del.onclick = () => div.remove();
+
+             div.appendChild(statSelect);
+             div.appendChild(opLabel);
+             div.appendChild(valInput);
+             div.appendChild(del);
+             chgList.appendChild(div);
+        };
+        
+        if (choice.statChanges) {
+            Object.entries(choice.statChanges).forEach(([k, v]) => renderChg(k, v));
+        }
+        (chgTitle.querySelector('button') as HTMLButtonElement).onclick = () => renderChg();
+
+        logicContainer.appendChild(reqTitle);
+        logicContainer.appendChild(reqList);
+        logicContainer.appendChild(chgTitle);
+        logicContainer.appendChild(chgList);
+
+        this.choicesContainer.appendChild(rowContainer);
     }
     
     save() {
         if (!this.choicesContainer) return { choices: [] };
         const newChoices: Choice[] = [];
-        this.choicesContainer.querySelectorAll('.flex.gap-2').forEach(row => {
-            const textInput = row.querySelector('input[type="text"]') as HTMLInputElement;
-            const sceneSelect = row.querySelector('select') as HTMLSelectElement;
-            const embedCheckbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
+        
+        // Iterate over row containers using the data attribute
+        this.choicesContainer.querySelectorAll('[data-choice-row="true"]').forEach(rowContainer => {
+            const textInput = rowContainer.querySelector('input[type="text"]') as HTMLInputElement;
+            const sceneSelect = rowContainer.querySelector('select') as HTMLSelectElement; // The first select is the scene select
+            const embedCheckbox = rowContainer.querySelectorAll('input[type="checkbox"]')[0] as HTMLInputElement;
+            const transferCheckbox = rowContainer.querySelectorAll('input[type="checkbox"]')[1] as HTMLInputElement;
             
             if (textInput && sceneSelect) {
+                // Parse Logic
+                const statRequirements: StatRequirement[] = [];
+                const statChanges: Record<string, number> = {};
+
+                const reqList = rowContainer.querySelector('[data-req-list="true"]');
+                if (reqList) {
+                    reqList.querySelectorAll('[data-req-item="true"]').forEach(div => {
+                        const sel = div.querySelector('select') as HTMLSelectElement;
+                        const inp = div.querySelector('input') as HTMLInputElement;
+                        if (sel.value && inp.value && !isNaN(parseFloat(inp.value))) {
+                            statRequirements.push({ stat: sel.value, threshold: parseFloat(inp.value) });
+                        }
+                    });
+                }
+
+                const chgList = rowContainer.querySelector('[data-chg-list="true"]');
+                if (chgList) {
+                     chgList.querySelectorAll('[data-chg-item="true"]').forEach(div => {
+                        const sel = div.querySelector('select') as HTMLSelectElement;
+                        const inp = div.querySelector('input') as HTMLInputElement;
+                        if (sel.value && inp.value && !isNaN(parseFloat(inp.value))) {
+                            statChanges[sel.value] = parseFloat(inp.value);
+                        }
+                    });
+                }
+
                 newChoices.push({
                     text: textInput.value,
                     nextSceneId: sceneSelect.value,
-                    embedOutcome: embedCheckbox.checked
+                    embedOutcome: embedCheckbox.checked,
+                    type: transferCheckbox.checked ? 'transfer' : undefined,
+                    statRequirements: statRequirements.length > 0 ? statRequirements : undefined,
+                    statChanges: Object.keys(statChanges).length > 0 ? statChanges : undefined
                 });
             }
         });
@@ -299,6 +469,49 @@ export class TransitionTool {
 
     save(blockElement: HTMLDivElement) {
         const select = blockElement.querySelector('#scene-select') as HTMLSelectElement;
+        return { nextSceneId: select.value };
+    }
+}
+
+export class TransferTool {
+    private data: { nextSceneId: string };
+    private scenes: ScenesData;
+    
+    static get isInline() { return false; }
+    static get toolbox() { return { title: 'Transfer (Direct)', icon: '⏭️' }; }
+
+    constructor({ data, config }: { data: { nextSceneId: string }, config: { scenes: ScenesData }}) {
+        this.data = { nextSceneId: data.nextSceneId || '' };
+        this.scenes = config.scenes;
+    }
+
+    render() {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'flex gap-2 items-center p-2 bg-purple-500/10 rounded border border-purple-500/30';
+        
+        const label = document.createElement('span');
+        label.innerText = 'Direct Transfer to:';
+        label.className = 'text-sm font-bold text-purple-700 dark:text-purple-300';
+
+        const sceneSelect = document.createElement('select');
+        sceneSelect.className = `${commonSelectClass} flex-grow`;
+        sceneSelect.tabIndex = -1;
+        const defaultOption = new Option('Select Scene...', '');
+        sceneSelect.add(defaultOption);
+        Object.values(this.scenes).forEach((s: Scene) => {
+            const option = new Option(s.name, s.id);
+            sceneSelect.add(option);
+        });
+        sceneSelect.value = this.data.nextSceneId;
+        sceneSelect.id = 'transfer-scene-select';
+
+        wrapper.appendChild(label);
+        wrapper.appendChild(sceneSelect);
+        return wrapper;
+    }
+
+    save(blockElement: HTMLDivElement) {
+        const select = blockElement.querySelector('#transfer-scene-select') as HTMLSelectElement;
         return { nextSceneId: select.value };
     }
 }
@@ -499,7 +712,6 @@ export class VideoTool {
         this.ui.videoContainer.innerHTML = '';
         
         // Prioritize tempBlobUrl for preview if it exists (active session), otherwise fallback to data.url
-        // Note: data.url might be 'img/events/foo.mp4' which won't play in the editor, so we might show an error or "File Linked" message.
         const src = this.tempBlobUrl || this.data.url;
 
         if (src) {
@@ -509,7 +721,6 @@ export class VideoTool {
             video.controls = true;
             video.tabIndex = -1;
             
-            // Handle error if the path is not playable in browser (e.g. relative export path)
             video.onerror = () => {
                 if (!this.ui.videoContainer) return;
                 this.ui.videoContainer.innerHTML = '';

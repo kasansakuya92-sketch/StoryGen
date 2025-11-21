@@ -1,3 +1,4 @@
+
 import React, { useCallback, useState } from 'react';
 import { Scene, ScenesData, CharactersData, DialogueItem, DialogueLength } from '../types.ts';
 import VeoGenerationModal from './VeoGenerationModal.tsx';
@@ -11,12 +12,13 @@ interface SceneEditorProps {
   scene: Scene;
   scenes: ScenesData;
   characters: CharactersData;
+  variables: string[];
   onUpdateScene: (sceneId: string, updatedScene: Partial<Scene>) => void;
 }
 
 const commonFormElement = "w-full bg-card/70 border border-border rounded-md p-2 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none";
 
-const SceneEditor: React.FC<SceneEditorProps> = ({ scene, scenes, characters, onUpdateScene }) => {
+const SceneEditor: React.FC<SceneEditorProps> = ({ scene, scenes, characters, variables, onUpdateScene }) => {
   const [isVeoModalOpen, setIsVeoModalOpen] = useState(false);
   const { settings } = useSettings();
   
@@ -81,6 +83,7 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, scenes, characters, on
                 scene={scene}
                 scenes={scenes}
                 characters={characters}
+                variables={variables}
                 onUpdateDialogue={handleDialogueUpdate}
                 settings={settings}
             />

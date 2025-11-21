@@ -1,4 +1,8 @@
 
+
+
+
+
 // utils/export.ts
 import { Project, Story, Scene, DialogueItem, CharactersData, Character, SceneCharacter } from '../types.ts';
 
@@ -178,7 +182,7 @@ export const exportStoryAsTwee = (story: Story) => {
         const scene = story.scenes[sceneId];
         if (scene) {
              scene.dialogue.forEach(item => {
-                if (item.type === 'transition' && item.nextSceneId) {
+                if ((item.type === 'transition' || item.type === 'transfer') && item.nextSceneId) {
                      visit(item.nextSceneId);
                 }
                 if (item.type === 'choice') {
@@ -281,13 +285,25 @@ const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, s
              case 'choice':
                 const choices = item.choices.map(c => {
                     const nextVar = c.nextSceneId ? varMap.get(c.nextSceneId) : null;
-                    return { text: formatText(c.text), result: nextVar || "null" };
+                    // Map result, stats, and optional type override
+                    return { 
+                        text: formatText(c.text), 
+                        type: c.type || undefined, // Only add type if explicitly set (e.g. 'transfer')
+                        result: nextVar || "null",
+                        statRequirements: c.statRequirements,
+                        statChanges: c.statChanges
+                    };
                 });
                 data.push({ ...base, type: 'choice', text: formatText("..."), choices });
                 break;
              case 'transition':
-                const nextVar = item.nextSceneId ? varMap.get(item.nextSceneId) : null;
-                data.push({ ...base, type: 'choice', text: "", choices: [{ text: "Continue", result: nextVar || "null" }] });
+                const transNextVar = item.nextSceneId ? varMap.get(item.nextSceneId) : null;
+                data.push({ ...base, type: 'choice', text: "", choices: [{ text: "Continue", result: transNextVar || "null" }] });
+                break;
+             case 'transfer':
+                const trfNextVar = item.nextSceneId ? varMap.get(item.nextSceneId) : null;
+                // Export as a standalone transfer object
+                data.push({ ...base, type: 'transfer', result: trfNextVar || "null" });
                 break;
              case 'end_story':
                 data.push({ ...base, type: 'narrative', text: "--- THE END ---", choices: [] });
@@ -304,11 +320,17 @@ const customStringify = (obj: any): string => {
         return `[${items}]`;
     } else if (typeof obj === 'object' && obj !== null) {
         const props = Object.entries(obj).map(([key, value]) => {
+            // Don't print undefined keys
+            if (value === undefined) return null;
+            
             if (key === 'result' && typeof value === 'string' && value.startsWith('$')) {
                  return `${key}: ${value}`;
             }
-             return `${key}: ${customStringify(value)}`;
-        }).join(', ');
+             // Quote keys for standard JSON compatibility, though Twee often accepts unquoted.
+             // Safe to use unquoted if simple, but let's stick to simple key output unless special chars.
+             const keyStr = /^[a-zA-Z0-9_]+$/.test(key) ? key : `"${key}"`;
+             return `${keyStr}: ${customStringify(value)}`;
+        }).filter(Boolean).join(', ');
         return `{ ${props} }`;
     } else if (typeof obj === 'string') {
         return JSON.stringify(obj); 
@@ -410,6 +432,8 @@ export const importStoryFromTwee = (tweeContent: string, currentProjectCharacter
                             dialogue.push({ type: 'image', url: item.text });
                         } else if (type === 'video') {
                             dialogue.push({ type: 'video', url: item.text });
+                        } else if (type === 'transfer') {
+                            dialogue.push({ type: 'transfer', nextSceneId: item.result });
                         } else if (type === 'choice') {
                             if (item.text) {
                                 // "Transition" exported as choice with empty text? No, transition has text "".
@@ -421,7 +445,10 @@ export const importStoryFromTwee = (tweeContent: string, currentProjectCharacter
                                      // It's a choice block
                                      const choices = (item.choices || []).map((c: any) => ({
                                          text: (c.text || '').replace(/<punc>/g, "'"),
-                                         nextSceneId: c.result // Placeholder
+                                         nextSceneId: c.result, // Placeholder
+                                         type: c.type, // Restore type if present
+                                         statRequirements: c.statRequirements,
+                                         statChanges: c.statChanges
                                      }));
                                      dialogue.push({ type: 'choice', choices });
                                 }
@@ -451,7 +478,7 @@ export const importStoryFromTwee = (tweeContent: string, currentProjectCharacter
         // Post-processing: Resolve variable names to Scene IDs in transitions/choices
         Object.values(scenes).forEach(scene => {
             scene.dialogue.forEach(item => {
-                if (item.type === 'transition' && item.nextSceneId) {
+                if ((item.type === 'transition' || item.type === 'transfer') && item.nextSceneId) {
                     item.nextSceneId = varMap.get(item.nextSceneId) || '';
                 } else if (item.type === 'choice') {
                     item.choices.forEach(c => {
@@ -544,7 +571,7 @@ export const importStoryFromTwee = (tweeContent: string, currentProjectCharacter
             });
             
             const last = dialogue[dialogue.length - 1];
-            if (!last || (last.type !== 'choice' && last.type !== 'transition')) {
+            if (!last || (last.type !== 'choice' && last.type !== 'transition' && last.type !== 'transfer')) {
                 dialogue.push({ type: 'end_story' });
             }
 

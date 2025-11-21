@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect } from 'react';
 import { exportProjectAsJson, exportStoryAsLegacyJson, exportStoryAsTwee, importStoryFromTwee } from '../utils/export.ts';
 import { Project, Story, CharactersData } from '../types.ts';
@@ -8,6 +9,7 @@ interface ToolbarProps {
   activeProject: Project | null;
   activeStory?: Story | null; // Added activeStory
   onToggleCharManager: () => void;
+  onToggleVariableManager: () => void;
   editorMode: 'FORM' | 'NODE';
   onToggleEditorMode: () => void;
   onOpenStoryPlanner: () => void;
@@ -24,7 +26,7 @@ const SettingsIcon = () => (
 );
 
 
-const Toolbar: React.FC<ToolbarProps> = ({ activeProject, activeStory, onToggleCharManager, editorMode, onToggleEditorMode, onOpenStoryPlanner, onGoToHub, onGoToSettings, onImportStory }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ activeProject, activeStory, onToggleCharManager, onToggleVariableManager, editorMode, onToggleEditorMode, onOpenStoryPlanner, onGoToHub, onGoToSettings, onImportStory }) => {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -113,6 +115,15 @@ const Toolbar: React.FC<ToolbarProps> = ({ activeProject, activeStory, onToggleC
           title="Toggle View"
         >
           {editorMode === 'FORM' ? 'Node View' : 'Form View'}
+        </button>
+        <button
+          onClick={onToggleVariableManager}
+          className="px-3 py-1.5 bg-secondary text-secondary-foreground text-xs rounded hover:bg-secondary/90 disabled:opacity-50"
+          disabled={!activeProject}
+          title="Manage Stats & Variables"
+        >
+           <span className="hidden sm:inline">$ Variables</span>
+           <span className="sm:hidden">$</span>
         </button>
         <button
           onClick={onToggleCharManager}
