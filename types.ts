@@ -65,6 +65,11 @@ export interface TransferLine {
   nextSceneId: string;
 }
 
+export interface RandomLine {
+  type: 'random';
+  variants: string[]; // Array of Scene IDs to choose from
+}
+
 export interface EndStory {
   type: 'end_story';
 }
@@ -92,7 +97,7 @@ export interface AIPromptLine {
   error?: string | null;
 }
 
-export type DialogueItem = TextLine | ChoiceLine | Transition | TransferLine | EndStory | AIPromptLine | ImageLine | VideoLine;
+export type DialogueItem = TextLine | ChoiceLine | Transition | TransferLine | RandomLine | EndStory | AIPromptLine | ImageLine | VideoLine;
 
 
 export interface Scene {
@@ -148,7 +153,7 @@ export interface Settings {
   localModelUrl: string;
 }
 
-export type AIStructureType = 'choice_branch' | 'linear_sequence';
+export type AIStructureType = 'choice_branch' | 'linear_sequence' | 'random_branch';
 
 export interface AIGeneratedScene {
   // A temporary ID used by the AI to link scenes together.

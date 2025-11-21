@@ -1,3 +1,4 @@
+
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import ReactFlow, {
   useNodesState,
@@ -14,7 +15,7 @@ import ReactFlow, {
   EdgeLabelRenderer,
   MarkerType,
 } from 'reactflow';
-import { ScenesData, Scene, CharactersData, AIGeneratedScene } from '../types.ts';
+import { ScenesData, Scene, CharactersData, AIGeneratedScene, DialogueItem, ChoiceLine, RandomLine } from '../types.ts';
 import AIGenerationModal from './AIGenerationModal.tsx';
 import AIStructureGenerationModal from './AIStructureGenerationModal.tsx';
 
@@ -96,8 +97,9 @@ const FlowSceneNode: React.FC<{ data: {
     isSelectionMode: boolean,
     selectionState: 'context' | 'target' | 'none',
     onNodeClick: (sceneId: string) => void,
+    onSwapEntryType: (sceneId: string, dialogueIndex: number, currentType: 'choice' | 'random') => void;
 } }> = ({ data }) => {
-  const { scene, onUpdateScene, onDeleteScene, isSelectionMode, selectionState, onNodeClick } = data;
+  const { scene, onUpdateScene, onDeleteScene, isSelectionMode, selectionState, onNodeClick, onSwapEntryType } = data;
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [name, setName] = useState(scene.name);
@@ -146,11 +148,11 @@ const FlowSceneNode: React.FC<{ data: {
       onDeleteScene(scene.id);
   };
 
-
-  // Calculate the total number of output ports (transitions + choices) to space them evenly
+  // Calculate the total number of output ports
   const outputPortCount = scene.dialogue.reduce((count, item) => {
     if (item.type === 'transition') return count + 1;
     if (item.type === 'choice') return count + item.choices.length;
+    if (item.type === 'random') return count + item.variants.length;
     return count;
   }, 0);
 
@@ -205,48 +207,89 @@ const FlowSceneNode: React.FC<{ data: {
       {/* A single target handle for all incoming connections */}
       <Handle type="target" position={Position.Left} className="!bg-primary" style={handleStyle}/>
 
-      {/* Dynamically create a source handle for each transition or choice */}
+      {/* Dynamically create a source handle for each transition, choice, or random variant */}
       <div className="py-1">
         {scene.dialogue.map((item, index) => {
             if (item.type === 'transition' && item.nextSceneId) {
-            const portId = `dialogue-${index}`;
-            const currentPortIndex = portIndex++;
-            return (
-                <div key={portId} className="relative">
-                <Handle
-                    type="source"
-                    position={Position.Right}
-                    id={portId}
-                    className="!bg-accent"
-                    style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (currentPortIndex + 1)}%` }}
-                />
-                <div className="text-xs text-right pr-8 py-0.5 text-foreground/60 truncate" title={`Transition to scene`}>➔ Transition</div>
-                </div>
-            );
-            }
-            if (item.type === 'choice') {
-            return item.choices.map((choice, choiceIndex) => {
-                if (!choice.nextSceneId) return null;
-                const portId = `dialogue-${index}-choice-${choiceIndex}`;
+                const portId = `dialogue-${index}`;
                 const currentPortIndex = portIndex++;
                 return (
                     <div key={portId} className="relative">
-                        <Handle
-                            type="source"
-                            position={Position.Right}
-                            id={portId}
-                            className="!bg-accent"
-                            style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (currentPortIndex + 1)}%` }}
-                        />
-                        <div className="text-xs text-right pr-8 py-0.5 text-foreground/60 truncate" title={choice.text}>? {choice.text || 'Choice'}</div>
+                    <Handle
+                        type="source"
+                        position={Position.Right}
+                        id={portId}
+                        className="!bg-accent"
+                        style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (currentPortIndex + 1)}%` }}
+                    />
+                    <div className="text-xs text-right pr-8 py-0.5 text-foreground/60 truncate" title={`Transition to scene`}>➔ Transition</div>
                     </div>
                 );
-            });
+            }
+            if (item.type === 'choice') {
+                return (
+                    <div key={`group-${index}`} className="relative group/choice">
+                        {item.choices.map((choice, choiceIndex) => {
+                            const portId = `dialogue-${index}-choice-${choiceIndex}`;
+                            const currentPortIndex = portIndex++;
+                            // Always render handle even if nextSceneId is missing to allow new connections
+                            return (
+                                <div key={portId} className="relative">
+                                    <Handle
+                                        type="source"
+                                        position={Position.Right}
+                                        id={portId}
+                                        className="!bg-accent"
+                                        style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (currentPortIndex + 1)}%` }}
+                                    />
+                                    <div className="text-xs text-right pr-8 py-0.5 text-foreground/60 truncate" title={choice.text}>? {choice.text || 'Choice'}</div>
+                                </div>
+                            );
+                        })}
+                         {/* Toggle Button */}
+                         <button 
+                            onClick={(e) => { e.stopPropagation(); onSwapEntryType(scene.id, index, 'choice'); }}
+                            className="absolute top-0 right-0 text-[10px] opacity-0 group-hover/choice:opacity-100 bg-secondary text-secondary-foreground px-1 rounded border border-border"
+                            title="Convert to Random Block"
+                         >
+                            🔄
+                         </button>
+                    </div>
+                );
+            }
+            if (item.type === 'random') {
+                return (
+                    <div key={`group-${index}`} className="relative group/random">
+                        {item.variants.map((_, vIndex) => {
+                            const portId = `dialogue-${index}-random-${vIndex}`;
+                            const currentPortIndex = portIndex++;
+                            return (
+                                <div key={portId} className="relative">
+                                    <Handle
+                                        type="source"
+                                        position={Position.Right}
+                                        id={portId}
+                                        className="!bg-purple-500"
+                                        style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (currentPortIndex + 1)}%` }}
+                                    />
+                                    <div className="text-xs text-right pr-8 py-0.5 text-purple-500 truncate">🎲 Variant {vIndex + 1}</div>
+                                </div>
+                            );
+                        })}
+                        {/* Toggle Button */}
+                         <button 
+                            onClick={(e) => { e.stopPropagation(); onSwapEntryType(scene.id, index, 'random'); }}
+                            className="absolute top-0 right-0 text-[10px] opacity-0 group-hover/random:opacity-100 bg-secondary text-secondary-foreground px-1 rounded border border-border"
+                            title="Convert to Choice Block"
+                         >
+                            🔄
+                         </button>
+                    </div>
+                );
             }
             return null;
         })}
 
-        {/* FIX: Add a generic output handle if no connections exist, so new nodes can be connected */}
         {outputPortCount === 0 && (
            <div className="relative">
                 <Handle
@@ -309,7 +352,7 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
     if (!sourceScene) return;
 
     const newDialogue = [...sourceScene.dialogue];
-    const outcomeIndex = newDialogue.findIndex(d => ['transition', 'choice'].includes(d.type));
+    const outcomeIndex = newDialogue.findIndex(d => ['transition', 'choice', 'random'].includes(d.type));
 
     if (outcomeIndex !== -1) {
         const outcome = newDialogue[outcomeIndex];
@@ -326,6 +369,13 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
             } else {
                 newDialogue[outcomeIndex] = { type: 'end_story' };
             }
+        } else if (outcome.type === 'random') {
+             const updatedVariants = outcome.variants.filter(v => v !== target);
+             if (updatedVariants.length === 0) {
+                 newDialogue[outcomeIndex] = { type: 'end_story' };
+             } else {
+                 newDialogue[outcomeIndex] = { ...outcome, variants: updatedVariants };
+             }
         }
         currentOnUpdateScene(source, { dialogue: newDialogue });
     }
@@ -343,7 +393,7 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
     if (!sourceScene || !targetScene) return;
     
     const newDialogue = [...sourceScene.dialogue];
-    const outcomeIndex = newDialogue.findIndex(d => ['transition', 'choice', 'end_story'].includes(d.type));
+    const outcomeIndex = newDialogue.findIndex(d => ['transition', 'choice', 'random', 'end_story'].includes(d.type));
 
     if (outcomeIndex !== -1) {
         const outcome = newDialogue[outcomeIndex];
@@ -362,6 +412,13 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
             if (!outcome.choices.some(c => c.nextSceneId === target)) {
                  outcome.choices.push({ text: `Go to ${targetScene.name}`, nextSceneId: target });
             }
+        } else if (outcome.type === 'random') {
+             // Allow multiples for random
+             if (!outcome.variants.includes(target)) {
+                 outcome.variants.push(target);
+             }
+             // If a variant slot was empty (e.g. created via tool but not connected), fill it?
+             // For now, simple push is safer for node editor logic.
         } else if (outcome.type === 'end_story') {
             newDialogue[outcomeIndex] = { type: 'transition', nextSceneId: target };
         }
@@ -372,6 +429,58 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
     currentOnUpdateScene(source, { dialogue: newDialogue });
 
   }, []);
+
+  const onSwapEntryType = useCallback((sceneId: string, dialogueIndex: number, currentType: 'choice' | 'random') => {
+        const currentScenes = scenesRef.current;
+        const scene = currentScenes[sceneId];
+        if (!scene) return;
+        const item = scene.dialogue[dialogueIndex];
+        
+        // 1. Prepare new dialogue item
+        let newItem: DialogueItem;
+        if (currentType === 'choice') {
+            // Convert Choice -> Random
+            newItem = { type: 'random', variants: (item as ChoiceLine).choices.map(c => c.nextSceneId) };
+        } else {
+            // Convert Random -> Choice
+            newItem = { type: 'choice', choices: (item as RandomLine).variants.map(v => ({ text: 'Next Option', nextSceneId: v })) };
+        }
+        
+        // 2. Update Scene Data
+        const newDialogue = [...scene.dialogue];
+        newDialogue[dialogueIndex] = newItem;
+        onUpdateScene(sceneId, { dialogue: newDialogue });
+
+        // 3. Update Edges instantly to preserve connections
+        setEdges((eds) => eds.map((edge) => {
+            if (edge.source !== sceneId) return edge;
+            
+            // Check if this edge belongs to the swapped item
+            // Handle format: dialogue-{index}-{type}-{subIndex}
+            const parts = edge.sourceHandle?.split('-');
+            if (!parts || parseInt(parts[1]) !== dialogueIndex) return edge;
+            
+            const subIndex = parts[3]; // e.g. '0' from 'choice-0' or 'random-0'
+            
+            if (currentType === 'choice') {
+                // Switching TO Random
+                return {
+                    ...edge,
+                    sourceHandle: `dialogue-${dialogueIndex}-random-${subIndex}`,
+                    style: { strokeWidth: 2, stroke: '#a855f7', strokeDasharray: '5,5' },
+                    markerEnd: { type: MarkerType.ArrowClosed, color: '#a855f7' }
+                };
+            } else {
+                // Switching TO Choice
+                return {
+                    ...edge,
+                    sourceHandle: `dialogue-${dialogueIndex}-choice-${subIndex}`,
+                    style: { strokeWidth: 2, stroke: 'rgb(var(--accent-rgb))', strokeDasharray: '0' },
+                    markerEnd: { type: MarkerType.ArrowClosed, color: 'rgb(var(--accent-rgb))' }
+                };
+            }
+        }));
+  }, [onUpdateScene, setEdges]);
 
   useEffect(() => {
     const newNodes: Node[] = Object.values(scenes).map((scene: Scene) => ({
@@ -385,9 +494,12 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
         isSelectionMode: !!selectionMode,
         selectionState: contextIds.includes(scene.id) ? 'context' : (targetId === scene.id ? 'target' : 'none'),
         onNodeClick: handleNodeClick,
+        onSwapEntryType
        },
     }));
 
+    // Reconstruct edges only if they haven't been handled by swap logic or if scene structure changes drastically
+    // We filter out edges that might be stale, but React Flow usually handles ID matching.
     const newEdges: Edge[] = [];
     Object.values(scenes).forEach((scene: Scene) => {
       scene.dialogue.forEach((item, index) => {
@@ -419,12 +531,30 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
               });
             }
           });
+        } else if (item.type === 'random') {
+            item.variants.forEach((variantId, vIndex) => {
+                if (variantId) {
+                    const portId = `dialogue-${index}-random-${vIndex}`;
+                    newEdges.push({
+                        id: `e-${scene.id}-${portId}-${variantId}`,
+                        source: scene.id,
+                        target: variantId,
+                        sourceHandle: portId,
+                        type: 'default',
+                        data: { onDeleteEdge },
+                        markerEnd: { type: MarkerType.ArrowClosed, color: '#a855f7' }, // Purple
+                        style: { strokeWidth: 2, stroke: '#a855f7', strokeDasharray: '5,5' } // Dashed line
+                    });
+                }
+            });
         }
       });
     });
     setNodes(newNodes);
+    // Only update edges from scratch if the count differs significantly to avoid jitter,
+    // but generally React Flow diffs well. 
     setEdges(newEdges);
-  }, [scenes, onUpdateScene, onDeleteScene, onDeleteEdge, selectionMode, contextIds, targetId]);
+  }, [scenes, onUpdateScene, onDeleteScene, onDeleteEdge, selectionMode, contextIds, targetId, onSwapEntryType]);
   
   const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
     onUpdateScene(node.id, { position: node.position });

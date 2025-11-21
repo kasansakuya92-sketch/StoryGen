@@ -454,7 +454,7 @@ const sceneStructureSchema = {
     properties: {
         scenes: {
             type: Type.ARRAY,
-            description: "An array of 2-3 new scenes to be created.",
+            description: "An array of new scenes to be created.",
             items: {
                 type: Type.OBJECT,
                 properties: {
@@ -490,13 +490,13 @@ const sceneStructureSchema = {
             properties: {
                 sourceSceneConnection: {
                     type: Type.OBJECT,
-                    description: "How the source scene connects to the new structure. Will be either a transition or a choice.",
+                    description: "How the source scene connects to the new structure. Will be a transition, choice, or random.",
                     properties: {
-                         type: { type: Type.STRING, enum: ['transition', 'choice'] },
+                         type: { type: Type.STRING, enum: ['transition', 'choice', 'random'] },
                          nextSceneId: { type: Type.STRING, description: "For a 'transition', the temporary ID of the first new scene." },
                          choices: {
                             type: Type.ARRAY,
-                            description: "For a 'choice', an array of choices. The number of choices must match the number of new outcome scenes.",
+                            description: "For a 'choice', an array of choices.",
                             items: {
                                 type: Type.OBJECT,
                                 properties: {
@@ -505,6 +505,11 @@ const sceneStructureSchema = {
                                 },
                                 required: ['text', 'nextSceneId']
                             }
+                         },
+                         variants: {
+                            type: Type.ARRAY,
+                            description: "For a 'random', an array of temporary scene IDs.",
+                            items: { type: Type.STRING }
                          }
                     },
                     required: ['type']
@@ -520,9 +525,8 @@ const sceneStructureSchema = {
                                 type: Type.OBJECT,
                                 description: "The outcome object to add to the source scene's dialogue.",
                                 properties: {
-                                    type: { type: Type.STRING, enum: ['transition', 'choice'] },
+                                    type: { type: Type.STRING, enum: ['transition', 'choice', 'random'] },
                                     nextSceneId: { type: Type.STRING, description: "For a 'transition', the temporary ID of the target scene." },
-                                    // FIX: Add the missing `choices` property definition to guide the AI.
                                     choices: {
                                         type: Type.ARRAY,
                                         description: "For a 'choice', an array of choices.",
@@ -534,7 +538,12 @@ const sceneStructureSchema = {
                                             },
                                             required: ['text', 'nextSceneId']
                                         }
-                                    }
+                                    },
+                                    variants: {
+                                        type: Type.ARRAY,
+                                        description: "For a 'random', an array of temporary scene IDs.",
+                                        items: { type: Type.STRING }
+                                     }
                                 },
                                 required: ['type']
                             }
@@ -557,9 +566,10 @@ export const generateSceneStructure = async (
     characters: CharactersData,
     prompt: string,
     structureType: AIStructureType,
+    branchCount: number = 2,
 ): Promise<{ scenes: AIGeneratedScene[], connections: any }> => {
     if (settings.aiProvider === 'local') {
-        return generateSceneStructureWithLocalAI(settings.localModelUrl, contextScenes, sourceScene, characters, prompt, structureType);
+        return generateSceneStructureWithLocalAI(settings.localModelUrl, contextScenes, sourceScene, characters, prompt, structureType, branchCount);
     }
 
     const ai = getGoogleAI();
@@ -568,23 +578,32 @@ export const generateSceneStructure = async (
     
     let structureDescription = '';
     let exampleStructure = '';
+    
     if (structureType === 'choice_branch') {
         structureDescription = `
             The structure should be a "Choice Branch":
             1.  One new scene that introduces a choice.
-            2.  Two new scenes representing the different outcomes of that choice.
-            Total scenes to generate: 3.
-            The source scene ('${sourceScene.name}') should transition to the new choice scene. The choice scene should then offer two choices, each leading to one of the new outcome scenes.
+            2.  ${branchCount} new scenes representing the different outcomes of that choice.
+            Total scenes to generate: ${1 + branchCount}.
+            The source scene ('${sourceScene.name}') should transition to the new choice scene. The choice scene should then offer ${branchCount} choices, each leading to one of the new outcome scenes.
         `;
-        exampleStructure = `For example, a 'choice_branch' would have a 'sourceSceneConnection' of type 'transition' pointing to the new choice scene, and the choice scene's outcome would be defined in 'internalConnections'.`;
+    } else if (structureType === 'random_branch') {
+        structureDescription = `
+            The structure should be a "Random Branch":
+            1.  One new scene (the 'Randomizer' scene) that determines a random outcome.
+            2.  ${branchCount} new outcome scenes.
+            Total scenes to generate: ${1 + branchCount}.
+            The source scene ('${sourceScene.name}') should transition to the 'Randomizer' scene.
+            The 'Randomizer' scene must contain a 'random' outcome block with exactly ${branchCount} variants in its 'variants' array.
+            Each variant in the 'variants' array must be the temporary ID of one of the ${branchCount} outcome scenes.
+        `;
     } else { // linear_sequence
         structureDescription = `
             The structure should be a "Linear Sequence":
-            1.  Three new scenes that follow each other in order.
-            Total scenes to generate: 3.
-            The source scene ('${sourceScene.name}') should transition to the first new scene. The first new scene should transition to the second, and the second to the third.
+            1.  ${branchCount} new scenes that follow each other in order.
+            Total scenes to generate: ${branchCount}.
+            The source scene ('${sourceScene.name}') should transition to the first new scene. The first new scene should transition to the second, and so on.
         `;
-        exampleStructure = `For example, a 'linear_sequence' would have a 'sourceSceneConnection' of type 'transition' pointing to the first new scene, and 'internalConnections' would define the transition from the first to the second, and second to the third.`;
     }
 
 
@@ -615,7 +634,8 @@ export const generateSceneStructure = async (
         INSTRUCTIONS:
         - Create all the scenes and the connections between them.
         - Each scene needs a temporary unique ID, a name, a description, a list of character IDs present, and 2-4 lines of dialogue.
-        - Define how the source scene connects to the new structure, and how the new scenes connect to each other. ${exampleStructure}
+        - Define how the source scene connects to the new structure, and how the new scenes connect to each other.
+        - If creating a choice or random branch, ensure you generate exactly ${branchCount} outcome scenes.
         - The dialogue should only consist of 'text' items.
         - Ensure all IDs used in connections match the temporary IDs of the generated scenes.
         - Your output must be a single, valid JSON object that strictly follows the provided schema.

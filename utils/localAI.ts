@@ -479,59 +479,34 @@ export const generateSceneStructureWithLocalAI = async (
     characters: CharactersData,
     prompt: string,
     structureType: AIStructureType,
+    branchCount: number = 2,
 ): Promise<{ scenes: AIGeneratedScene[], connections: any }> => {
     const characterDescriptions = Object.values(characters).map(c => `- ${c.name} (id: ${c.id})`).join('\n');
     const storySoFar = contextScenes.map((s, index) => `${index + 1}. Scene '${s.name}': ${s.description}`).join('\n');
     
     let structureDescription = '';
     let exampleStructure = '';
+    
     if (structureType === 'choice_branch') {
-        structureDescription = `The structure should be a "Choice Branch": create 3 new scenes. The source scene should transition to the first new scene, which will present a choice. The other two new scenes will be the outcomes of that choice.`;
+        structureDescription = `The structure should be a "Choice Branch": create ${1 + branchCount} new scenes. The source scene transitions to the first new scene (Choice Scene). The choice scene offers ${branchCount} choices, each leading to one of the other ${branchCount} new scenes (Outcome Scenes).`;
         exampleStructure = `
-EXAMPLE JSON OUTPUT for a 'choice_branch':
+EXAMPLE JSON OUTPUT for a 'choice_branch' with 2 choices:
 {
   "scenes": [
-    {
-      "id": "confrontation_start",
-      "name": "The Confrontation",
-      "description": "The hero confronts the mysterious figure about the stolen artifact.",
-      "characterIds": ["hero", "friend"],
-      "dialogue": [
-        {"type": "text", "characterId": "hero", "text": "I know you have it. Give it back."}
-      ]
-    },
-    {
-      "id": "fight_outcome",
-      "name": "A Fierce Battle",
-      "description": "The hero decides to fight, and a desperate battle ensues.",
-      "characterIds": ["hero", "friend"],
-      "dialogue": [
-        {"type": "text", "characterId": null, "text": "Sparks fly as their blades clash."}
-      ]
-    },
-    {
-      "id": "negotiate_outcome",
-      "name": "A Tense Negotiation",
-      "description": "The hero tries to reason with the figure, hoping to avoid bloodshed.",
-      "characterIds": ["hero", "friend"],
-      "dialogue": [
-        {"type": "text", "characterId": "hero", "text": "There has to be another way."}
-      ]
-    }
+    { "id": "confrontation_start", "name": "The Confrontation", "description": "...", "characterIds": ["hero"], "dialogue": [{"type": "text", "characterId": "hero", "text": "..."}] },
+    { "id": "fight_outcome", "name": "Battle", "description": "...", "characterIds": ["hero"], "dialogue": [{"type": "text", "characterId": null, "text": "..."}] },
+    { "id": "negotiate_outcome", "name": "Talk", "description": "...", "characterIds": ["hero"], "dialogue": [{"type": "text", "characterId": "hero", "text": "..."}] }
   ],
   "connections": {
-    "sourceSceneConnection": {
-      "type": "transition",
-      "nextSceneId": "confrontation_start"
-    },
+    "sourceSceneConnection": { "type": "transition", "nextSceneId": "confrontation_start" },
     "internalConnections": [
       {
         "sourceSceneId": "confrontation_start",
         "outcome": {
           "type": "choice",
           "choices": [
-            {"text": "Attack the figure!", "nextSceneId": "fight_outcome"},
-            {"text": "Try to negotiate.", "nextSceneId": "negotiate_outcome"}
+            {"text": "Attack", "nextSceneId": "fight_outcome"},
+            {"text": "Negotiate", "nextSceneId": "negotiate_outcome"}
           ]
         }
       }
@@ -539,54 +514,45 @@ EXAMPLE JSON OUTPUT for a 'choice_branch':
   }
 }
 `;
-    } else { // linear_sequence
-        structureDescription = `The structure should be a "Linear Sequence": create 3 new scenes that follow each other in order. The source scene transitions to the first, the first to the second, and the second to the third.`;
+    } else if (structureType === 'random_branch') {
+        structureDescription = `The structure should be a "Random Branch": create ${1 + branchCount} new scenes. The source scene transitions to the first new scene (Randomizer). The randomizer scene has a 'random' outcome with ${branchCount} variants, each pointing to one of the outcome scenes.`;
         exampleStructure = `
-EXAMPLE JSON OUTPUT for a 'linear_sequence':
+EXAMPLE JSON OUTPUT for a 'random_branch' with 2 variants:
 {
   "scenes": [
-    {
-      "id": "forest_entrance",
-      "name": "Forest Entrance",
-      "description": "The heroes arrive at the edge of the dark forest.",
-      "characterIds": ["hero", "friend"],
-      "dialogue": [
-        {"type": "text", "characterId": "hero", "text": "Well, here we are."}
-      ]
-    },
-    {
-      "id": "deeper_in",
-      "name": "Deeper In",
-      "description": "They venture deeper, the trees closing in around them.",
-      "characterIds": ["hero", "friend"],
-      "dialogue": [
-        {"type": "text", "characterId": "friend", "text": "It's getting dark..."}
-      ]
-    },
-    {
-      "id": "the_clearing",
-      "name": "The Clearing",
-      "description": "They finally reach a moonlit clearing in the center of the forest.",
-      "characterIds": ["hero", "friend"],
-      "dialogue": [
-        {"type": "text", "characterId": null, "text": "A sense of peace fills the air."}
-      ]
-    }
+    { "id": "roll_dice", "name": "Rolling Dice", "description": "...", "characterIds": ["hero"], "dialogue": [{"type": "text", "characterId": "hero", "text": "Let's see..."}] },
+    { "id": "win", "name": "Win", "description": "...", "characterIds": ["hero"], "dialogue": [{"type": "text", "characterId": "hero", "text": "I won!"}] },
+    { "id": "lose", "name": "Lose", "description": "...", "characterIds": ["hero"], "dialogue": [{"type": "text", "characterId": "hero", "text": "I lost..."}] }
   ],
   "connections": {
-    "sourceSceneConnection": {
-      "type": "transition",
-      "nextSceneId": "forest_entrance"
-    },
+    "sourceSceneConnection": { "type": "transition", "nextSceneId": "roll_dice" },
     "internalConnections": [
       {
-        "sourceSceneId": "forest_entrance",
-        "outcome": {"type": "transition", "nextSceneId": "deeper_in"}
-      },
-      {
-        "sourceSceneId": "deeper_in",
-        "outcome": {"type": "transition", "nextSceneId": "the_clearing"}
+        "sourceSceneId": "roll_dice",
+        "outcome": {
+          "type": "random",
+          "variants": ["win", "lose"]
+        }
       }
+    ]
+  }
+}
+`;
+    } else { // linear_sequence
+        structureDescription = `The structure should be a "Linear Sequence": create ${branchCount} new scenes that follow each other in order.`;
+         exampleStructure = `
+EXAMPLE JSON OUTPUT for a 'linear_sequence' (count 3):
+{
+  "scenes": [
+    { "id": "s1", "name": "Scene 1", "description": "...", "characterIds": [], "dialogue": [...] },
+    { "id": "s2", "name": "Scene 2", "description": "...", "characterIds": [], "dialogue": [...] },
+    { "id": "s3", "name": "Scene 3", "description": "...", "characterIds": [], "dialogue": [...] }
+  ],
+  "connections": {
+    "sourceSceneConnection": { "type": "transition", "nextSceneId": "s1" },
+    "internalConnections": [
+      { "sourceSceneId": "s1", "outcome": {"type": "transition", "nextSceneId": "s2"} },
+      { "sourceSceneId": "s2", "outcome": {"type": "transition", "nextSceneId": "s3"} }
     ]
   }
 }
@@ -612,7 +578,7 @@ USER PROMPT: "${prompt}"
 REQUESTED STRUCTURE: ${structureDescription}
 
 INSTRUCTIONS:
-- The "scenes" key must be an array of 2-3 new scene objects. Each must have a temporary 'id', 'name', 'description', 'characterIds', and a short 'dialogue' array (text only).
+- The "scenes" key must be an array of ${structureType === 'linear_sequence' ? branchCount : 1 + branchCount} new scene objects. Each must have a temporary 'id', 'name', 'description', 'characterIds', and a short 'dialogue' array (text only).
 - The "connections" key must be an object. It needs a "sourceSceneConnection" (how the source scene connects to the new structure) and "internalConnections" (how new scenes connect to each other).
 - All 'nextSceneId' and 'sourceSceneId' values in the connections MUST match the temporary 'id's of the scenes you generate.
 

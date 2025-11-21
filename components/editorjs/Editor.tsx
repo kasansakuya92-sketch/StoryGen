@@ -2,8 +2,8 @@
 
 import React, { useRef, useEffect, useMemo } from 'react';
 // FIX: Add `Character` to imports to be used for explicit typing.
-import { DialogueItem, Scene, ScenesData, CharactersData, Settings, TextLine, ChoiceLine, Transition, EndStory, AIPromptLine, ImageLine, VideoLine, Character, TransferLine } from '../../types.ts';
-import { TextTool, ChoiceTool, TransitionTool, EndStoryTool, AIPromptTool, ImageTool, VideoTool, TransferTool } from './tools.ts';
+import { DialogueItem, Scene, ScenesData, CharactersData, Settings, TextLine, ChoiceLine, Transition, EndStory, AIPromptLine, ImageLine, VideoLine, Character, TransferLine, RandomLine } from '../../types.ts';
+import { TextTool, ChoiceTool, TransitionTool, EndStoryTool, AIPromptTool, ImageTool, VideoTool, TransferTool, RandomTool } from './tools.ts';
 import { generateDialogueForScene } from '../../utils/ai.ts';
 
 // Make EditorJS globally available for TS
@@ -30,6 +30,8 @@ const toEditorJSData = (dialogue: DialogueItem[]) => {
                 return { type: 'transition', data: { nextSceneId: item.nextSceneId } };
             case 'transfer':
                 return { type: 'transfer', data: { nextSceneId: item.nextSceneId } };
+            case 'random':
+                return { type: 'random', data: { variants: item.variants } };
             case 'end_story':
                 return { type: 'endStory', data: {} };
             case 'ai_prompt':
@@ -61,6 +63,8 @@ const fromEditorJSData = (editorData: any): DialogueItem[] => {
                 return { type: 'transition', nextSceneId: block.data.nextSceneId || '' };
             case 'transfer':
                 return { type: 'transfer', nextSceneId: block.data.nextSceneId || '' };
+            case 'random':
+                return { type: 'random', variants: block.data.variants || [] };
             case 'endStory':
                 return { type: 'end_story' };
             case 'aiPrompt':
@@ -164,6 +168,10 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, scenes, characte
                 },
                 transfer: {
                     class: TransferTool,
+                    config: { scenes },
+                },
+                random: {
+                    class: RandomTool,
                     config: { scenes },
                 },
                 endStory: EndStoryTool,

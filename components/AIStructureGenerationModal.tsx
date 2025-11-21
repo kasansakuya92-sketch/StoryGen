@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Scene, CharactersData, ScenesData, AIStructureType, AIGeneratedScene } from '../types.ts';
 import { generateSceneStructure } from '../utils/ai.ts';
 import { useSettings } from '../contexts/SettingsContext.tsx';
+import MilestoneSlider, { SliderOption } from './MilestoneSlider.tsx';
 
 interface AIStructureGenerationModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({
   const [sourceSceneId, setSourceSceneId] = useState<string>(Object.keys(allScenes)[0] || '');
   const [contextSceneIds, setContextSceneIds] = useState<string[]>([]);
   const [structureType, setStructureType] = useState<AIStructureType>('choice_branch');
+  const [branchCount, setBranchCount] = useState<string>('2'); // Slider uses string value
   const [prompt, setPrompt] = useState('');
   
   const [isLoading, setIsLoading] = useState(false);
@@ -35,6 +37,13 @@ const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({
       prev.includes(sceneId) ? prev.filter(id => id !== sceneId) : [...prev, sceneId]
     );
   };
+
+  const branchOptions: SliderOption[] = [
+      { value: '2', label: '2', description: 'Two Branches' },
+      { value: '3', label: '3', description: 'Three Branches' },
+      { value: '4', label: '4', description: 'Four Branches' },
+      { value: '5', label: '5', description: 'Five Branches' },
+  ];
   
   const handleGenerate = async () => {
     if (!sourceSceneId || !prompt) {
@@ -50,7 +59,8 @@ const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({
             allScenes[sourceSceneId],
             allCharacters,
             prompt,
-            structureType
+            structureType,
+            parseInt(branchCount, 10)
         );
         onAddSceneStructure(generatedData, sourceSceneId);
         onClose();
@@ -100,13 +110,27 @@ const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({
                         ))}
                     </div>
                 </div>
-                <div>
-                     <label className="block text-sm font-bold mb-1">Structure Type</label>
-                    <select value={structureType} onChange={e => setStructureType(e.target.value as AIStructureType)} className={commonFormElement} disabled={isLoading}>
-                        <option value="choice_branch">Choice Branch (1 choice -> 2 outcomes)</option>
-                        <option value="linear_sequence">Linear Sequence (3 scenes in a row)</option>
-                    </select>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                         <label className="block text-sm font-bold mb-1">Structure Type</label>
+                        <select value={structureType} onChange={e => setStructureType(e.target.value as AIStructureType)} className={commonFormElement} disabled={isLoading}>
+                            <option value="choice_branch">Choice Branch</option>
+                            <option value="random_branch">Random Selection Branch</option>
+                            <option value="linear_sequence">Linear Sequence</option>
+                        </select>
+                    </div>
+                    <div>
+                        <MilestoneSlider
+                            label="Branch Count / Length"
+                            value={branchCount}
+                            onChange={setBranchCount}
+                            options={branchOptions}
+                            disabled={isLoading}
+                        />
+                    </div>
                 </div>
+
                 <div>
                     <label className="block text-sm font-bold mb-1">Prompt</label>
                     <textarea

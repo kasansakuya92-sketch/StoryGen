@@ -1,8 +1,4 @@
 
-
-
-
-
 // utils/export.ts
 import { Project, Story, Scene, DialogueItem, CharactersData, Character, SceneCharacter } from '../types.ts';
 
@@ -190,6 +186,11 @@ export const exportStoryAsTwee = (story: Story) => {
                         if (c.nextSceneId) visit(c.nextSceneId);
                     });
                 }
+                if (item.type === 'random') {
+                    item.variants.forEach(vId => {
+                        if(vId) visit(vId);
+                    });
+                }
              });
         }
         visiting.delete(sceneId);
@@ -234,10 +235,42 @@ export const exportStoryAsTwee = (story: Story) => {
     downloadFile(output, `${story.name.replace(/\s+/g, '_')}.twee`);
 };
 
-const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, string>): string => {
-    const data: any[] = [];
+// Recursion depth tracker to prevent infinite loops in random blocks if scene references itself
+const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, string>, depth = 0): string => {
+    if (depth > 5) return "[]"; // Safety break
+
+    const segments: string[] = [];
+    let currentBuffer: any[] = [];
+
+    const flushBuffer = () => {
+        if (currentBuffer.length > 0) {
+            segments.push(customStringify(currentBuffer));
+            currentBuffer = [];
+        }
+    };
     
     scene.dialogue.forEach(item => {
+        // 1. Handle Random Blocks (which break the linear array structure)
+        if (item.type === 'random') {
+            flushBuffer();
+            
+            const variants = item.variants.map(variantSceneId => {
+                const variantScene = story.scenes[variantSceneId];
+                if (variantScene) {
+                    // Recursively serialize the content of the referenced scene inline
+                    return serializeSceneForTwee(variantScene, story, varMap, depth + 1);
+                }
+                return "[]";
+            });
+            
+            if (variants.length > 0) {
+                segments.push(`either(${variants.join(', ')})`);
+            }
+            return; // Skip standard processing for this item
+        }
+
+
+        // 2. Standard Processing
         let charName = "", gender = "neutral";
         const characterId = 'characterId' in item ? item.characterId : null;
         if (characterId) {
@@ -252,8 +285,8 @@ const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, s
         // Special handling for Narration vs Empty character
         if (!characterId) {
             if (item.type === 'video') {
-                charName = ""; // Strictly empty for video
-                gender = "na"; // Special flag for video
+                charName = ""; 
+                gender = "na"; 
             } else if (item.type === 'image') {
                 charName = "";
                 gender = "na";
@@ -268,19 +301,19 @@ const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, s
         switch(item.type) {
             case 'text':
             case 'thought':
-                data.push({ ...base, type: item.type === 'thought' ? 'thought' : 'speech', text: formatText(item.text), choices: [] });
+                currentBuffer.push({ ...base, type: item.type === 'thought' ? 'thought' : 'speech', text: formatText(item.text), choices: [] });
                 break;
             case 'sms':
-                data.push({ ...base, type: 'speech', text: `(SMS) ${formatText(item.text)}`, choices: [] });
+                currentBuffer.push({ ...base, type: 'speech', text: `(SMS) ${formatText(item.text)}`, choices: [] });
                 break;
              case 'system':
-                data.push({ ...base, type: 'narrative', text: formatText(item.text), choices: [] });
+                currentBuffer.push({ ...base, type: 'narrative', text: formatText(item.text), choices: [] });
                 break;
              case 'image':
-                data.push({ ...base, type: 'image', text: item.url, choices: [] });
+                currentBuffer.push({ ...base, type: 'image', text: item.url, choices: [] });
                 break;
              case 'video':
-                data.push({ ...base, type: 'video', text: item.url, choices: [] });
+                currentBuffer.push({ ...base, type: 'video', text: item.url, choices: [] });
                 break;
              case 'choice':
                 const choices = item.choices.map(c => {
@@ -289,29 +322,39 @@ const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, s
                     return { 
                         text: formatText(c.text), 
                         type: c.type || undefined, // Only add type if explicitly set (e.g. 'transfer')
-                        result: nextVar || "null",
+                        result: nextVar || null, // Use actual null value for cleaner export
                         statRequirements: c.statRequirements,
                         statChanges: c.statChanges
                     };
                 });
-                data.push({ ...base, type: 'choice', text: formatText("..."), choices });
+                currentBuffer.push({ ...base, type: 'choice', text: formatText("..."), choices });
                 break;
              case 'transition':
                 const transNextVar = item.nextSceneId ? varMap.get(item.nextSceneId) : null;
-                data.push({ ...base, type: 'choice', text: "", choices: [{ text: "Continue", result: transNextVar || "null" }] });
+                currentBuffer.push({ ...base, type: 'choice', text: "", choices: [{ text: "Continue", result: transNextVar || null }] });
                 break;
              case 'transfer':
                 const trfNextVar = item.nextSceneId ? varMap.get(item.nextSceneId) : null;
                 // Export as a standalone transfer object
-                data.push({ ...base, type: 'transfer', result: trfNextVar || "null" });
+                currentBuffer.push({ ...base, type: 'transfer', result: trfNextVar || null });
                 break;
              case 'end_story':
-                data.push({ ...base, type: 'narrative', text: "--- THE END ---", choices: [] });
+                currentBuffer.push({ ...base, type: 'narrative', text: "--- THE END ---", choices: [] });
                 break;
         }
     });
 
-    return customStringify(data);
+    flushBuffer();
+
+    if (segments.length === 0) return "[]";
+    if (segments.length === 1) return segments[0];
+
+    // Join with .concat() to flatten arrays in JS/Twee
+    // Example: [A, B].concat(either([C], [D])).concat([E])
+    return segments.reduce((acc, curr, index) => {
+        if (index === 0) return curr;
+        return `${acc}.concat(${curr})`;
+    }, "");
 };
 
 const customStringify = (obj: any): string => {
@@ -319,6 +362,11 @@ const customStringify = (obj: any): string => {
         const items = obj.map(customStringify).join(', ');
         return `[${items}]`;
     } else if (typeof obj === 'object' && obj !== null) {
+        // Handle special raw code injection (e.g. for either(...) functions)
+        if (obj.__raw__) {
+            return obj.__raw__;
+        }
+
         const props = Object.entries(obj).map(([key, value]) => {
             // Don't print undefined keys
             if (value === undefined) return null;
@@ -400,6 +448,15 @@ export const importStoryFromTwee = (tweeContent: string, currentProjectCharacter
             
             // Fix loose keys if necessary (export produces valid keys, but just in case)
             jsonString = jsonString.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
+
+            // Attempt to handle .concat() in import (Basic support only)
+            // If jsonString contains .concat, it's advanced structure.
+            // We might need to split by .concat and parse parts, but `JSON.parse` won't handle functions.
+            // For simple re-importing, we might just skip the random parts or log warning,
+            // OR attempt to strip .concat wrappers if simple.
+            // Given the complexity, we'll wrap parse in try-catch and maybe fallback or simplistic parsing.
+            // NOTE: This import logic is basic. Supporting re-import of .concat structures requires a JS parser.
+            // We will assume standard array parsing for now.
 
             try {
                 const data = JSON.parse(jsonString);

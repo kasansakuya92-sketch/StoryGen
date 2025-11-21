@@ -1,11 +1,9 @@
 
-
 import { Character, CharactersData, Choice, Scene, ScenesData, DialogueLength, AIPromptLine, StatRequirement } from '../../types.ts';
 
 const commonInputClass = "bg-card/80 border-border rounded p-1 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none w-full";
 const commonSelectClass = "bg-card/80 border-border rounded p-1 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none";
 const commonButtonClass = "text-xs bg-secondary/70 text-secondary-foreground p-1 rounded hover:bg-secondary/90";
-const commonStyleToolClass = "p-2 cursor-pointer hover:bg-secondary/50 flex items-center justify-center";
 
 
 export class TextTool {
@@ -307,6 +305,7 @@ export class ChoiceTool {
              if (r) valInput.value = r.threshold.toString();
 
              const del = document.createElement('button');
+             del.type = 'button';
              del.innerHTML = '&times;';
              del.className = "text-destructive ml-1";
              del.onclick = () => div.remove();
@@ -354,6 +353,7 @@ export class ChoiceTool {
              if (val !== undefined) valInput.value = val.toString();
 
              const del = document.createElement('button');
+             del.type = 'button';
              del.innerHTML = '&times;';
              del.className = "text-destructive ml-1";
              del.onclick = () => div.remove();
@@ -386,8 +386,9 @@ export class ChoiceTool {
         this.choicesContainer.querySelectorAll('[data-choice-row="true"]').forEach(rowContainer => {
             const textInput = rowContainer.querySelector('input[type="text"]') as HTMLInputElement;
             const sceneSelect = rowContainer.querySelector('select') as HTMLSelectElement; // The first select is the scene select
-            const embedCheckbox = rowContainer.querySelectorAll('input[type="checkbox"]')[0] as HTMLInputElement;
-            const transferCheckbox = rowContainer.querySelectorAll('input[type="checkbox"]')[1] as HTMLInputElement;
+            const checkboxes = rowContainer.querySelectorAll('input[type="checkbox"]');
+            const embedCheckbox = checkboxes[0] as HTMLInputElement;
+            const transferCheckbox = checkboxes[1] as HTMLInputElement;
             
             if (textInput && sceneSelect) {
                 // Parse Logic
@@ -429,6 +430,102 @@ export class ChoiceTool {
         return { choices: newChoices };
     }
 }
+
+export class RandomTool {
+    private data: { variants: string[] };
+    private scenes: ScenesData;
+    private wrapper: HTMLDivElement | null = null;
+    private variantsContainer: HTMLDivElement | null = null;
+
+    static get isInline() { return false; }
+    static get toolbox() { return { title: 'Random Logic', icon: '🎲' }; }
+
+    constructor({ data, config }: { data: { variants: string[] }, config: { scenes: ScenesData }}) {
+        this.data = { variants: data.variants || [] };
+        this.scenes = config.scenes;
+    }
+
+    render() {
+        this.wrapper = document.createElement('div');
+        this.wrapper.className = 'pl-4 border-l-4 border-purple-500/50 space-y-2 p-2 bg-purple-500/5';
+
+        const header = document.createElement('div');
+        header.className = "text-sm font-bold text-purple-700 dark:text-purple-300 mb-2 flex items-center gap-2";
+        header.innerHTML = `<span>🎲 Random Branching</span> <span class="text-xs font-normal opacity-70">(Picks one at random)</span>`;
+        this.wrapper.appendChild(header);
+
+        this.variantsContainer = document.createElement('div');
+        this.variantsContainer.className = 'space-y-2';
+        
+        if (this.data.variants.length === 0) {
+            this.addVariantRow('');
+            this.addVariantRow('');
+        } else {
+            this.data.variants.forEach(v => this.addVariantRow(v));
+        }
+
+        const addButton = document.createElement('button');
+        addButton.type = 'button';
+        addButton.innerText = '+ Add Variant';
+        addButton.className = commonButtonClass;
+        addButton.onclick = () => this.addVariantRow('');
+        addButton.tabIndex = -1;
+
+        this.wrapper.appendChild(this.variantsContainer);
+        this.wrapper.appendChild(addButton);
+        return this.wrapper;
+    }
+
+    addVariantRow(sceneId: string) {
+        if (!this.variantsContainer) return;
+        
+        const row = document.createElement('div');
+        row.className = 'flex gap-2 items-center';
+        row.setAttribute('data-variant-row', 'true');
+
+        const label = document.createElement('span');
+        label.className = "text-xs font-mono text-foreground/60 w-16 text-right";
+        label.innerText = `Variant:`;
+
+        const sceneSelect = document.createElement('select');
+        sceneSelect.className = `${commonSelectClass} flex-grow`;
+        sceneSelect.tabIndex = -1;
+        const defaultOption = new Option('Select Scene...', '');
+        sceneSelect.add(defaultOption);
+        Object.values(this.scenes).forEach((s: Scene) => {
+            const option = new Option(s.name, s.id);
+            sceneSelect.add(option);
+        });
+        sceneSelect.value = sceneId;
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.innerHTML = '&times;';
+        deleteButton.title = 'Remove Variant';
+        deleteButton.className = 'text-destructive/70 hover:text-destructive font-bold text-lg px-2';
+        deleteButton.onclick = () => row.remove();
+        deleteButton.tabIndex = -1;
+
+        row.appendChild(label);
+        row.appendChild(sceneSelect);
+        row.appendChild(deleteButton);
+        this.variantsContainer.appendChild(row);
+    }
+
+    save() {
+        if (!this.variantsContainer) return { variants: [] };
+        const variants: string[] = [];
+        
+        this.variantsContainer.querySelectorAll('[data-variant-row="true"]').forEach(row => {
+            const select = row.querySelector('select') as HTMLSelectElement;
+            if (select && select.value) {
+                variants.push(select.value);
+            }
+        });
+        return { variants };
+    }
+}
+
 
 export class TransitionTool {
     private data: { nextSceneId: string };
