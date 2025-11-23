@@ -1,6 +1,7 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 // FIX: Add file extensions to fix module resolution issues.
-import { Scene, DialogueItem, SceneCharacter, CharactersData } from '../types.ts';
+import { Scene, DialogueItem, SceneCharacter, CharactersData, Choice, Condition } from '../types.ts';
 import CharacterSprite from './CharacterSprite';
 import DialogueBox from './DialogueBox';
 import ChoiceButtons from './ChoiceButtons';
@@ -11,9 +12,11 @@ interface GameScreenProps {
   onNavigate: (nextSceneId: string) => void;
   onEnd: () => void;
   onOpenEditor: () => void;
+  variableState: Record<string, number>;
+  onUpdateVariables: (updates: Record<string, number>) => void;
 }
 
-const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, onEnd, onOpenEditor }) => {
+const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, onEnd, onOpenEditor, variableState, onUpdateVariables }) => {
   const [dialogueIndex, setDialogueIndex] = useState(0);
   const [isTyping, setIsTyping] = useState(true);
   const [activeSprites, setActiveSprites] = useState<Record<string, string>>({});
@@ -26,17 +29,56 @@ const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, 
     setIsTyping(true);
   }, [scene]);
 
+  // Helper to check conditions
+  const checkCondition = useCallback((condition: Condition) => {
+      const currentValue = variableState[condition.variable] || 0;
+      switch (condition.operator) {
+          case '>': return currentValue > condition.value;
+          case '<': return currentValue < condition.value;
+          case '>=': return currentValue >= condition.value;
+          case '<=': return currentValue <= condition.value;
+          case '==': return currentValue === condition.value;
+          case '!=': return currentValue !== condition.value;
+          default: return false;
+      }
+  }, [variableState]);
+
+
   useEffect(() => {
-    // Handle non-interactive dialogue items
+    // Handle non-interactive dialogue items automatically
     if (currentLine) {
       if (currentLine.type === 'transition') {
         onNavigate(currentLine.nextSceneId);
       } else if (currentLine.type === 'end_story') {
         onEnd();
       } else if (currentLine.type === 'text') {
-        setIsTyping(true); // Start typing for new text line
+        setIsTyping(true); 
       } else if (currentLine.type === 'image' || currentLine.type === 'video') {
-        setIsTyping(false); // Images and videos are instant
+        setIsTyping(false);
+      } else if (currentLine.type === 'random') {
+        // Pick a random variant
+        const variants = currentLine.variants.filter(v => v); // Filter out empty strings
+        if (variants.length > 0) {
+             const randomId = variants[Math.floor(Math.random() * variants.length)];
+             onNavigate(randomId);
+        } else {
+             // Fallback if no variants
+             onEnd();
+        }
+      } else if (currentLine.type === 'condition') {
+          // All conditions must be met (AND logic)
+          const isTrue = currentLine.conditions.every(c => checkCondition(c));
+          
+          const nextId = isTrue ? currentLine.branches.true : currentLine.branches.false;
+          if (nextId) {
+              onNavigate(nextId);
+          } else {
+              // If branch is empty, maybe just continue to next line in current scene? 
+              // For now, let's assume branching logic should be strict, but fallback to next line prevents soft-lock.
+              setDialogueIndex(prev => prev + 1);
+          }
+      } else if (currentLine.type === 'transfer') {
+          onNavigate(currentLine.nextSceneId);
       }
     }
 
@@ -53,7 +95,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, 
     }
     setActiveSprites(newActiveSprites);
 
-  }, [scene, dialogueIndex, onNavigate, onEnd, currentLine]);
+  }, [scene, dialogueIndex, onNavigate, onEnd, currentLine, checkCondition]);
 
   const handleNext = useCallback(() => {
     if (isTyping || !currentLine) {
@@ -69,9 +111,12 @@ const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, 
     }
   }, [isTyping, dialogueIndex, scene.dialogue.length, currentLine]);
 
-  const handleChoice = useCallback((nextSceneId: string) => {
-    onNavigate(nextSceneId);
-  }, [onNavigate]);
+  const handleChoice = useCallback((choice: Choice) => {
+      if (choice.statChanges) {
+          onUpdateVariables(choice.statChanges);
+      }
+      onNavigate(choice.nextSceneId);
+  }, [onNavigate, onUpdateVariables]);
 
   const handleFinishedTyping = useCallback(() => {
     setIsTyping(false);
@@ -85,6 +130,18 @@ const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, 
   };
 
   const isClickable = !isTyping && (currentLine?.type === 'text' || currentLine?.type === 'image' || currentLine.type === 'video');
+
+  // Filter choices based on requirements
+  const availableChoices = currentLine?.type === 'choice' 
+      ? currentLine.choices.filter(c => {
+          if (!c.statRequirements) return true;
+          return c.statRequirements.every(req => {
+              const val = variableState[req.stat] || 0;
+              // Assuming threshold implies >= for simplicity, or matching Twee usage
+              return val >= req.threshold;
+          });
+      }) 
+      : [];
 
   return (
     <div className="relative w-full h-full overflow-hidden select-none" >
@@ -134,8 +191,12 @@ const GameScreen: React.FC<GameScreenProps> = ({ scene, characters, onNavigate, 
 
       {currentLine?.type === 'choice' && (
         <ChoiceButtons
-          choices={currentLine.choices}
-          onChoiceSelect={handleChoice}
+          choices={availableChoices}
+          onChoiceSelect={(nextId) => {
+              // Find the full choice object to pass back for stat updates
+              const selected = availableChoices.find(c => c.nextSceneId === nextId);
+              if(selected) handleChoice(selected);
+          }}
         />
       )}
     </div>

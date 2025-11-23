@@ -1,5 +1,4 @@
 
-
 // types.ts
 
 export interface Sprite {
@@ -57,7 +56,6 @@ export interface ChoiceLine {
 export interface Transition {
   type: 'transition';
   nextSceneId: string;
-  nextStoryId?: string;
 }
 
 export interface TransferLine {
@@ -68,6 +66,21 @@ export interface TransferLine {
 export interface RandomLine {
   type: 'random';
   variants: string[]; // Array of Scene IDs to choose from
+}
+
+export interface Condition {
+    variable: string;
+    operator: '>' | '<' | '==' | '>=' | '<=' | '!=';
+    value: number;
+}
+
+export interface ConditionLine {
+    type: 'condition';
+    conditions: Condition[];
+    branches: {
+        true: string;
+        false: string;
+    };
 }
 
 export interface EndStory {
@@ -97,7 +110,7 @@ export interface AIPromptLine {
   error?: string | null;
 }
 
-export type DialogueItem = TextLine | ChoiceLine | Transition | TransferLine | RandomLine | EndStory | AIPromptLine | ImageLine | VideoLine;
+export type DialogueItem = TextLine | ChoiceLine | Transition | TransferLine | RandomLine | ConditionLine | EndStory | AIPromptLine | ImageLine | VideoLine;
 
 
 export interface Scene {

@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { generateStoryPlan, generateDialogueForScene } from '../utils/ai.ts';
 import { ScenesData, CharactersData, TextLine, SceneCharacter, DialogueLength, SceneLength, DialogueItem, Scene, Character } from '../types.ts';
@@ -7,9 +8,10 @@ import MilestoneSlider, { SliderOption } from './MilestoneSlider.tsx';
 interface AIStoryPlannerProps {
   onPlanGenerated: (plan: { name: string, scenes: ScenesData, characters: CharactersData }) => void;
   onClose: () => void;
+  existingCharacters?: CharactersData;
 }
 
-const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClose }) => {
+const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClose, existingCharacters }) => {
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Generating...');
@@ -18,6 +20,13 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
   const [dialogueLength, setDialogueLength] = useState<DialogueLength>('Short');
   const [sceneLength, setSceneLength] = useState<SceneLength>('Short');
   const [storyType, setStoryType] = useState<'branching' | 'linear'>('branching');
+  const [useExistingCharacters, setUseExistingCharacters] = useState(false);
+  
+  // State to track which characters are selected for import
+  const [selectedCharIds, setSelectedCharIds] = useState<string[]>(() => 
+    existingCharacters ? Object.keys(existingCharacters) : []
+  );
+
   const { settings } = useSettings();
 
   const sceneLengthOptions: SliderOption[] = [
@@ -43,7 +52,12 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
     setLoadingMessage('Generating story plan...');
 
     try {
-      const plan = await generateStoryPlan(settings, prompt, sceneLength, storyType);
+      // Filter characters based on selection if "Use Existing" is checked
+      const charsToUse = useExistingCharacters && existingCharacters
+        ? Object.fromEntries(Object.entries(existingCharacters).filter(([id]) => selectedCharIds.includes(id))) as CharactersData
+        : undefined;
+      
+      const plan = await generateStoryPlan(settings, prompt, sceneLength, storyType, charsToUse);
 
       // --- SELF-CORRECTION AND VALIDATION STEP ---
       if (!plan.scenes || !Array.isArray(plan.scenes)) {
@@ -102,11 +116,22 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
 
       // Transform plan into StoryData and CharactersData, handling both array (Google) and object (Local) formats
       let newCharacters: CharactersData = {};
+      
+      // If importing, initialize with ONLY the selected existing characters to preserve sprites and full data
+      if (useExistingCharacters && existingCharacters) {
+          newCharacters = Object.fromEntries(
+             Object.entries(existingCharacters).filter(([id]) => selectedCharIds.includes(id))
+          ) as CharactersData;
+      }
+
       if (plan.characters) {
           if (Array.isArray(plan.characters)) {
               // Handle Google AI's array format
               plan.characters.forEach((char: Character) => {
                   if (char && char.id) {
+                    // If using existing chars, don't overwrite them with AI's truncated version
+                    if (newCharacters[char.id]) return;
+
                     newCharacters[char.id] = {
                         ...char,
                         defaultSpriteId: 'normal',
@@ -116,7 +141,13 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
               });
           } else if (typeof plan.characters === 'object' && !Array.isArray(plan.characters)) {
               // Handle Local AI's pre-formatted object
-              newCharacters = plan.characters;
+              const localChars = plan.characters as CharactersData;
+              // Merge in case local AI added new chars
+              Object.values(localChars).forEach(char => {
+                  if (!newCharacters[char.id]) {
+                      newCharacters[char.id] = char;
+                  }
+              });
           }
       }
 
@@ -207,9 +238,16 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
       setIsLoading(false);
     }
   };
+  
+  const toggleCharSelection = (id: string) => {
+      setSelectedCharIds(prev => 
+          prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+      );
+  };
 
   const commonSelectClass = "mt-1 block w-full bg-card/80 border border-border rounded-md p-2 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none";
   const commonLabelClass = "block text-sm font-medium text-foreground/80";
+  const hasExistingChars = existingCharacters && Object.keys(existingCharacters).length > 0;
 
   return (
     <div className="fixed inset-0 bg-onyx/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -275,6 +313,49 @@ const AIStoryPlanner: React.FC<AIStoryPlannerProps> = ({ onPlanGenerated, onClos
               Generate initial dialogue for each scene
             </label>
           </div>
+
+          {hasExistingChars && (
+            <div className="border-t border-border pt-4 mt-2">
+                <div className="flex items-center">
+                    <input
+                        type="checkbox"
+                        id="use-existing-chars"
+                        checked={useExistingCharacters}
+                        onChange={(e) => setUseExistingCharacters(e.target.checked)}
+                        className="h-4 w-4 rounded border-border bg-card text-primary focus:ring-ring"
+                        disabled={isLoading}
+                    />
+                    <label htmlFor="use-existing-chars" className="ml-2 block text-sm font-bold text-primary cursor-pointer select-none">
+                        Import characters from current story
+                    </label>
+                </div>
+                
+                {useExistingCharacters && (
+                    <div className="mt-3 bg-card/30 p-3 rounded border border-border animate-fade-in">
+                        <p className="text-xs font-semibold text-foreground/70 mb-2">Select Cast Members:</p>
+                        <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                            {Object.values(existingCharacters!).map((char: Character) => (
+                                 <div 
+                                    key={char.id} 
+                                    onClick={() => !isLoading && toggleCharSelection(char.id)}
+                                    className={`flex items-center p-2 rounded border cursor-pointer transition-colors ${selectedCharIds.includes(char.id) ? 'bg-primary/10 border-primary' : 'bg-card border-border hover:border-primary/50'} ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                    <div className={`w-4 h-4 rounded border mr-2 flex items-center justify-center flex-shrink-0 transition-colors ${selectedCharIds.includes(char.id) ? 'bg-primary border-primary' : 'border-foreground/40'}`}>
+                                        {selectedCharIds.includes(char.id) && <span className="text-primary-foreground text-[10px] font-bold">✓</span>}
+                                    </div>
+                                    <span className="text-xs font-medium truncate select-none">{char.name}</span>
+                                </div>
+                            ))}
+                        </div>
+                         <div className="mt-2 flex justify-between text-xs">
+                            <button onClick={() => !isLoading && setSelectedCharIds(Object.keys(existingCharacters!))} className="text-primary hover:underline disabled:opacity-50" disabled={isLoading}>Select All</button>
+                            <button onClick={() => !isLoading && setSelectedCharIds([])} className="text-foreground/60 hover:text-foreground disabled:opacity-50" disabled={isLoading}>Deselect All</button>
+                        </div>
+                    </div>
+                )}
+            </div>
+          )}
+
           {error && <p className="text-destructive text-xs">{error}</p>}
         </div>
         <footer className="p-4 border-t border-border flex justify-end gap-2">

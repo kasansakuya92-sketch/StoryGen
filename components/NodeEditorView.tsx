@@ -1,5 +1,5 @@
 
-import React, { useCallback, useState, useRef, useEffect } from 'react';
+import React, { useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import ReactFlow, {
   useNodesState,
   useEdgesState,
@@ -15,7 +15,7 @@ import ReactFlow, {
   EdgeLabelRenderer,
   MarkerType,
 } from 'reactflow';
-import { ScenesData, Scene, CharactersData, AIGeneratedScene, DialogueItem, ChoiceLine, RandomLine } from '../types.ts';
+import { ScenesData, Scene, CharactersData, AIGeneratedScene, DialogueItem, ChoiceLine, RandomLine, ConditionLine } from '../types.ts';
 import AIGenerationModal from './AIGenerationModal.tsx';
 import AIStructureGenerationModal from './AIStructureGenerationModal.tsx';
 
@@ -28,6 +28,7 @@ interface NodeEditorViewProps {
   onDeleteScene: (sceneId: string) => void;
   activeStoryId: string | null;
   onAddSceneStructure: (generated: { scenes: AIGeneratedScene[], connections: any }, sourceSceneId: string) => void;
+  onSceneSelect: (sceneId: string) => void;
 }
 
 const TrashIcon = () => (
@@ -96,10 +97,12 @@ const FlowSceneNode: React.FC<{ data: {
     onDeleteScene: NodeEditorViewProps['onDeleteScene'],
     isSelectionMode: boolean,
     selectionState: 'context' | 'target' | 'none',
+    showLogicLens: boolean,
     onNodeClick: (sceneId: string) => void,
-    onSwapEntryType: (sceneId: string, dialogueIndex: number, currentType: 'choice' | 'random') => void;
+    onSceneSelect: (sceneId: string) => void,
+    onSwapEntryType: (sceneId: string, dialogueIndex: number, newType: string) => void;
 } }> = ({ data }) => {
-  const { scene, onUpdateScene, onDeleteScene, isSelectionMode, selectionState, onNodeClick, onSwapEntryType } = data;
+  const { scene, onUpdateScene, onDeleteScene, isSelectionMode, selectionState, showLogicLens, onNodeClick, onSceneSelect, onSwapEntryType } = data;
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [name, setName] = useState(scene.name);
@@ -125,6 +128,34 @@ const FlowSceneNode: React.FC<{ data: {
     }
   }, [isEditingDesc]);
 
+  // Calculate Logic Summary for Lens
+  const logicSummary = useMemo(() => {
+      const reqs: string[] = [];
+      const effects: string[] = [];
+      
+      scene.dialogue.forEach(item => {
+          if (item.type === 'condition') {
+              item.conditions.forEach(c => reqs.push(`IF $${c.variable} ${c.operator} ${c.value}`));
+          }
+          if (item.type === 'choice') {
+              item.choices.forEach(c => {
+                  if (c.statRequirements) {
+                       c.statRequirements.forEach(r => reqs.push(`Req: $${r.stat} >= ${r.threshold}`));
+                  }
+                  if (c.statChanges) {
+                      Object.entries(c.statChanges).forEach(([k, v]) => {
+                          const val = v as number;
+                          effects.push(`$${k} ${val >= 0 ? '+' : ''}${val}`)
+                      });
+                  }
+              });
+          }
+      });
+      return { reqs, effects };
+  }, [scene.dialogue]);
+
+  const hasLogic = logicSummary.reqs.length > 0 || logicSummary.effects.length > 0;
+
   const handleNameSave = () => {
     setIsEditingName(false);
     if (name.trim() && name.trim() !== scene.name) {
@@ -144,8 +175,17 @@ const FlowSceneNode: React.FC<{ data: {
   };
 
 
-  const handleDelete = () => {
+  const handleDelete = (e: React.MouseEvent) => {
+      e.stopPropagation();
       onDeleteScene(scene.id);
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+      if (isSelectionMode) {
+          onNodeClick(scene.id);
+      } else {
+          onSceneSelect(scene.id);
+      }
   };
 
   // Calculate the total number of output ports
@@ -153,6 +193,7 @@ const FlowSceneNode: React.FC<{ data: {
     if (item.type === 'transition') return count + 1;
     if (item.type === 'choice') return count + item.choices.length;
     if (item.type === 'random') return count + item.variants.length;
+    if (item.type === 'condition') return count + 2; // True + False
     return count;
   }, 0);
 
@@ -163,11 +204,11 @@ const FlowSceneNode: React.FC<{ data: {
       target: 'ring-2 ring-green-500 shadow-lg shadow-green-500/30',
       none: '',
   };
-  const nodeClasses = `bg-card/90 backdrop-blur-md border rounded-lg shadow-xl w-64 group relative transition-all duration-200 ${isSelectionMode ? `cursor-pointer ${selectionClasses[selectionState]}` : 'border-border'}`;
+  const nodeClasses = `bg-card/90 backdrop-blur-md border rounded-lg shadow-xl w-64 group relative transition-all duration-200 cursor-pointer ${isSelectionMode ? selectionClasses[selectionState] : 'border-border hover:border-primary'}`;
 
 
   return (
-    <div className={nodeClasses} onClick={() => isSelectionMode && onNodeClick(scene.id)}>
+    <div className={nodeClasses} onClick={handleClick}>
        <button 
         onClick={handleDelete}
         className="absolute -top-2 -right-2 p-1 rounded-full bg-destructive/80 text-destructive-foreground hover:bg-destructive opacity-0 group-hover:opacity-100 transition-opacity z-10"
@@ -185,12 +226,14 @@ const FlowSceneNode: React.FC<{ data: {
                 onBlur={handleNameSave}
                 onKeyDown={e => e.key === 'Enter' && handleNameSave()}
                 className="w-full bg-background text-foreground p-0 m-0 border-0 outline-none ring-1 ring-ring rounded"
+                onClick={e => e.stopPropagation()}
             />
         ) : (
             scene.name
         )}
       </div>
-      <div className="p-3 text-xs text-foreground/80 border-b border-border/50 min-h-[40px]" onDoubleClick={() => !isSelectionMode && setIsEditingDesc(true)}>
+      
+      <div className="relative p-3 text-xs text-foreground/80 border-b border-border/50 min-h-[40px]" onDoubleClick={() => !isSelectionMode && setIsEditingDesc(true)}>
         {isEditingDesc ? (
             <textarea
                 ref={descTextareaRef}
@@ -198,16 +241,41 @@ const FlowSceneNode: React.FC<{ data: {
                 onChange={e => setDescription(e.target.value)}
                 onBlur={handleDescSave}
                 className="w-full h-20 bg-background text-foreground p-1 m-0 border-0 outline-none ring-1 ring-ring rounded resize-none text-xs"
+                onClick={e => e.stopPropagation()}
             />
         ) : (
             scene.description || <span className="italic text-foreground/50">Double-click to add description</span>
+        )}
+
+        {/* Logic Lens Overlay */}
+        {showLogicLens && (
+            <div className="absolute inset-0 bg-card z-10 p-2 overflow-y-auto text-[10px] font-mono border-b border-border/50">
+                {hasLogic ? (
+                    <div className="space-y-1.5">
+                        {logicSummary.reqs.length > 0 && (
+                            <div>
+                                <div className="font-bold text-yellow-600 dark:text-yellow-500 text-[9px] uppercase tracking-wider mb-0.5">Conditions</div>
+                                {logicSummary.reqs.map((r, i) => <div key={i} className="truncate text-foreground/90 bg-yellow-500/10 rounded px-1 mb-0.5" title={r}>{r}</div>)}
+                            </div>
+                        )}
+                        {logicSummary.effects.length > 0 && (
+                            <div>
+                                <div className="font-bold text-blue-600 dark:text-blue-400 text-[9px] uppercase tracking-wider mb-0.5">Effects</div>
+                                {logicSummary.effects.map((e, i) => <div key={i} className="truncate text-foreground/90 bg-blue-500/10 rounded px-1 mb-0.5" title={e}>{e}</div>)}
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="h-full flex items-center justify-center text-foreground/40 italic text-[10px]">No Logic</div>
+                )}
+            </div>
         )}
       </div>
 
       {/* A single target handle for all incoming connections */}
       <Handle type="target" position={Position.Left} className="!bg-primary" style={handleStyle}/>
 
-      {/* Dynamically create a source handle for each transition, choice, or random variant */}
+      {/* Dynamically create a source handle for each transition, choice, random or condition */}
       <div className="py-1">
         {scene.dialogue.map((item, index) => {
             if (item.type === 'transition' && item.nextSceneId) {
@@ -226,67 +294,100 @@ const FlowSceneNode: React.FC<{ data: {
                     </div>
                 );
             }
-            if (item.type === 'choice') {
+            
+            // Render Dropdown Header for swappable types
+            const isBranching = item.type === 'choice' || item.type === 'random' || item.type === 'condition';
+            const typeColor = item.type === 'random' ? 'text-purple-500' : (item.type === 'condition' ? 'text-yellow-600' : 'text-foreground/80');
+            
+            if (isBranching) {
                 return (
-                    <div key={`group-${index}`} className="relative group/choice">
-                        {item.choices.map((choice, choiceIndex) => {
-                            const portId = `dialogue-${index}-choice-${choiceIndex}`;
-                            const currentPortIndex = portIndex++;
-                            // Always render handle even if nextSceneId is missing to allow new connections
-                            return (
-                                <div key={portId} className="relative">
+                    <div key={`group-${index}`} className="relative group/block pb-2 mb-2 border-b border-border/30 last:border-0 last:mb-0">
+                         {/* Permanent Type Swap Dropdown (Integrated into header) */}
+                         <div className="flex items-center justify-between px-2 pb-1">
+                             <div className={`text-[10px] font-bold uppercase tracking-wider ${typeColor}`}>
+                                {item.type}
+                             </div>
+                             <select 
+                                className="text-[10px] bg-card border border-border rounded shadow-sm py-0.5 px-1 outline-none cursor-pointer opacity-50 hover:opacity-100 focus:opacity-100 transition-opacity"
+                                value={item.type}
+                                onChange={(e) => onSwapEntryType(scene.id, index, e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                             >
+                                 <option value="choice">Choice</option>
+                                 <option value="random">Random</option>
+                                 <option value="condition">Condition</option>
+                             </select>
+                         </div>
+
+                        {/* Outputs */}
+                        {item.type === 'choice' && (
+                             item.choices.map((choice, choiceIndex) => {
+                                const portId = `dialogue-${index}-choice-${choiceIndex}`;
+                                const currentPortIndex = portIndex++;
+                                return (
+                                    <div key={portId} className="relative">
+                                        <Handle
+                                            type="source"
+                                            position={Position.Right}
+                                            id={portId}
+                                            className="!bg-accent"
+                                            style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (currentPortIndex + 1)}%` }}
+                                        />
+                                        <div className="text-xs text-right pr-8 py-0.5 text-foreground/60 truncate" title={choice.text}>? {choice.text || 'Choice'}</div>
+                                    </div>
+                                );
+                            })
+                        )}
+
+                        {item.type === 'random' && (
+                            item.variants.map((_, vIndex) => {
+                                const portId = `dialogue-${index}-random-${vIndex}`;
+                                const currentPortIndex = portIndex++;
+                                return (
+                                    <div key={portId} className="relative">
+                                        <Handle
+                                            type="source"
+                                            position={Position.Right}
+                                            id={portId}
+                                            className="!bg-purple-500"
+                                            style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (currentPortIndex + 1)}%` }}
+                                        />
+                                        <div className="text-xs text-right pr-8 py-0.5 text-purple-500 truncate">🎲 Variant {vIndex + 1}</div>
+                                    </div>
+                                );
+                            })
+                        )}
+
+                        {item.type === 'condition' && (
+                            <>
+                                 <div className="relative">
                                     <Handle
                                         type="source"
                                         position={Position.Right}
-                                        id={portId}
-                                        className="!bg-accent"
-                                        style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (currentPortIndex + 1)}%` }}
+                                        id={`dialogue-${index}-condition-true`}
+                                        className="!bg-green-500"
+                                        style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (portIndex + 1)}%` }}
                                     />
-                                    <div className="text-xs text-right pr-8 py-0.5 text-foreground/60 truncate" title={choice.text}>? {choice.text || 'Choice'}</div>
+                                    <div className="text-xs text-right pr-8 py-0.5 text-green-600 dark:text-green-400 font-semibold">True →</div>
                                 </div>
-                            );
-                        })}
-                         {/* Toggle Button */}
-                         <button 
-                            onClick={(e) => { e.stopPropagation(); onSwapEntryType(scene.id, index, 'choice'); }}
-                            className="absolute top-0 right-0 text-[10px] opacity-0 group-hover/choice:opacity-100 bg-secondary text-secondary-foreground px-1 rounded border border-border"
-                            title="Convert to Random Block"
-                         >
-                            🔄
-                         </button>
-                    </div>
-                );
-            }
-            if (item.type === 'random') {
-                return (
-                    <div key={`group-${index}`} className="relative group/random">
-                        {item.variants.map((_, vIndex) => {
-                            const portId = `dialogue-${index}-random-${vIndex}`;
-                            const currentPortIndex = portIndex++;
-                            return (
-                                <div key={portId} className="relative">
+                                {(() => { portIndex++; return null; })()}
+                                <div className="relative">
                                     <Handle
                                         type="source"
                                         position={Position.Right}
-                                        id={portId}
-                                        className="!bg-purple-500"
-                                        style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (currentPortIndex + 1)}%` }}
+                                        id={`dialogue-${index}-condition-false`}
+                                        className="!bg-red-500"
+                                        style={{ ...handleStyle, top: `${(100 / (outputPortCount + 1)) * (portIndex + 1)}%` }}
                                     />
-                                    <div className="text-xs text-right pr-8 py-0.5 text-purple-500 truncate">🎲 Variant {vIndex + 1}</div>
+                                    <div className="text-xs text-right pr-8 py-0.5 text-red-600 dark:text-red-400 font-semibold">False →</div>
                                 </div>
-                            );
-                        })}
-                        {/* Toggle Button */}
-                         <button 
-                            onClick={(e) => { e.stopPropagation(); onSwapEntryType(scene.id, index, 'random'); }}
-                            className="absolute top-0 right-0 text-[10px] opacity-0 group-hover/random:opacity-100 bg-secondary text-secondary-foreground px-1 rounded border border-border"
-                            title="Convert to Choice Block"
-                         >
-                            🔄
-                         </button>
+                                {(() => { portIndex++; return null; })()}
+                            </>
+                        )}
                     </div>
                 );
             }
+
             return null;
         })}
 
@@ -313,7 +414,7 @@ const edgeTypes = { default: CustomEdge };
 type SelectionMode = false | 'context' | 'target';
 
 // Main Component
-const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onUpdateScene, onAddScene, onDeleteScene, activeStoryId, onAddSceneStructure }) => {
+const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onUpdateScene, onAddScene, onDeleteScene, activeStoryId, onAddSceneStructure, onSceneSelect }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   
@@ -322,6 +423,9 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
   const [contextIds, setContextIds] = useState<string[]>([]);
   const [targetId, setTargetId] = useState<string | null>(null);
   const [isStructureModalOpen, setIsStructureModalOpen] = useState(false);
+  
+  // State for Logic Lens
+  const [showLogicLens, setShowLogicLens] = useState(false);
 
 
   const scenesRef = useRef(scenes);
@@ -352,7 +456,7 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
     if (!sourceScene) return;
 
     const newDialogue = [...sourceScene.dialogue];
-    const outcomeIndex = newDialogue.findIndex(d => ['transition', 'choice', 'random'].includes(d.type));
+    const outcomeIndex = newDialogue.findIndex(d => ['transition', 'choice', 'random', 'condition'].includes(d.type));
 
     if (outcomeIndex !== -1) {
         const outcome = newDialogue[outcomeIndex];
@@ -361,7 +465,6 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
             newDialogue[outcomeIndex] = { type: 'end_story' };
         } else if (outcome.type === 'choice') {
             const updatedChoices = outcome.choices.filter(c => c.nextSceneId !== target);
-
             if (updatedChoices.length > 1) {
                 newDialogue[outcomeIndex] = { ...outcome, choices: updatedChoices };
             } else if (updatedChoices.length === 1) {
@@ -376,6 +479,12 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
              } else {
                  newDialogue[outcomeIndex] = { ...outcome, variants: updatedVariants };
              }
+        } else if (outcome.type === 'condition') {
+            // If deleting a branch, clear it
+             const newBranches = { ...outcome.branches };
+             if (outcome.branches.true === target) newBranches.true = '';
+             if (outcome.branches.false === target) newBranches.false = '';
+             newDialogue[outcomeIndex] = { ...outcome, branches: newBranches };
         }
         currentOnUpdateScene(source, { dialogue: newDialogue });
     }
@@ -385,7 +494,7 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
     const currentScenes = scenesRef.current;
     const currentOnUpdateScene = onUpdateSceneRef.current;
 
-    const { source, target } = connection;
+    const { source, target, sourceHandle } = connection;
     if (!source || !target) return;
 
     const sourceScene = currentScenes[source];
@@ -393,94 +502,124 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
     if (!sourceScene || !targetScene) return;
     
     const newDialogue = [...sourceScene.dialogue];
-    const outcomeIndex = newDialogue.findIndex(d => ['transition', 'choice', 'random', 'end_story'].includes(d.type));
+    
+    // Determine which block we are connecting from based on handle ID
+    // Format: dialogue-{index} or dialogue-{index}-{type}-{sub}
+    let outcomeIndex = -1;
+    if (sourceHandle === 'source-new') {
+        // Appending new
+    } else if (sourceHandle) {
+        const parts = sourceHandle.split('-');
+        if (parts[0] === 'dialogue') {
+            outcomeIndex = parseInt(parts[1]);
+        }
+    }
 
+    // Logic for connecting existing blocks (Conditions, specific choice slots, etc)
     if (outcomeIndex !== -1) {
         const outcome = newDialogue[outcomeIndex];
-        if (outcome.type === 'transition') {
-            if (outcome.nextSceneId === target) return; 
-            
-            const existingTargetScene = currentScenes[outcome.nextSceneId];
-            newDialogue[outcomeIndex] = {
-                type: 'choice',
-                choices: [
-                    { text: `Go to ${existingTargetScene?.name || '...'}`, nextSceneId: outcome.nextSceneId },
-                    { text: `Go to ${targetScene.name}`, nextSceneId: target },
-                ]
-            };
-        } else if (outcome.type === 'choice') {
+        
+        if (outcome.type === 'condition') {
+            const isTrueBranch = sourceHandle?.includes('true');
+            const newBranches = { ...outcome.branches };
+            if (isTrueBranch) newBranches.true = target;
+            else newBranches.false = target;
+            newDialogue[outcomeIndex] = { ...outcome, branches: newBranches };
+        } 
+        // For Choice/Random, ReactFlow handles usually map 1:1, but if we dragged from a specific handle, we might want to update THAT choice.
+        // However, standard behavior often appends if simple connection.
+        // Let's stick to appending/updating logic:
+        else if (outcome.type === 'choice') {
+             // If connecting from generic or new handle, add choice.
+             // If connecting from existing handle, update it? 
+             // Simplified: Check if target exists. If not, add.
             if (!outcome.choices.some(c => c.nextSceneId === target)) {
                  outcome.choices.push({ text: `Go to ${targetScene.name}`, nextSceneId: target });
             }
         } else if (outcome.type === 'random') {
-             // Allow multiples for random
              if (!outcome.variants.includes(target)) {
                  outcome.variants.push(target);
              }
-             // If a variant slot was empty (e.g. created via tool but not connected), fill it?
-             // For now, simple push is safer for node editor logic.
-        } else if (outcome.type === 'end_story') {
-            newDialogue[outcomeIndex] = { type: 'transition', nextSceneId: target };
+        } else if (outcome.type === 'transition') {
+             // Convert transition to choice if dragging elsewhere? Or just update?
+             // Let's update connection if existing, or create choice if dragging to NEW target (handled by "source-new" usually)
+             if (outcome.nextSceneId !== target) {
+                 // User wants a choice presumably
+                 newDialogue[outcomeIndex] = {
+                    type: 'choice',
+                    choices: [
+                        { text: `Go to ${currentScenes[outcome.nextSceneId]?.name || '...'}`, nextSceneId: outcome.nextSceneId },
+                        { text: `Go to ${targetScene.name}`, nextSceneId: target },
+                    ]
+                };
+             }
         }
     } else {
-        newDialogue.push({ type: 'transition', nextSceneId: target });
+        // Creating new connection from "..." handle
+        // Check if last item is end_story or we should append
+        const lastIdx = newDialogue.length - 1;
+        const lastItem = newDialogue[lastIdx];
+        
+        if (lastItem && (lastItem.type === 'end_story' || lastItem.type === 'text')) {
+             // Replace end_story or append to text
+             if (lastItem.type === 'end_story') newDialogue.pop();
+             newDialogue.push({ type: 'transition', nextSceneId: target });
+        } else {
+             newDialogue.push({ type: 'transition', nextSceneId: target });
+        }
     }
     
     currentOnUpdateScene(source, { dialogue: newDialogue });
 
   }, []);
 
-  const onSwapEntryType = useCallback((sceneId: string, dialogueIndex: number, currentType: 'choice' | 'random') => {
+  const onSwapEntryType = useCallback((sceneId: string, dialogueIndex: number, newType: string) => {
         const currentScenes = scenesRef.current;
         const scene = currentScenes[sceneId];
         if (!scene) return;
         const item = scene.dialogue[dialogueIndex];
         
-        // 1. Prepare new dialogue item
         let newItem: DialogueItem;
-        if (currentType === 'choice') {
-            // Convert Choice -> Random
-            newItem = { type: 'random', variants: (item as ChoiceLine).choices.map(c => c.nextSceneId) };
+        
+        // Helper to extract existing targets to preserve connections
+        const getTargets = (): string[] => {
+            if (item.type === 'choice') return item.choices.map(c => c.nextSceneId);
+            if (item.type === 'random') return item.variants;
+            if (item.type === 'condition') return [item.branches.true, item.branches.false].filter(Boolean);
+            return [];
+        };
+        
+        const targets = getTargets();
+        // Pad targets if needed
+        while(targets.length < 2) targets.push('');
+
+        if (newType === 'choice') {
+            newItem = { 
+                type: 'choice', 
+                choices: targets.map((t, i) => ({ text: `Option ${i+1}`, nextSceneId: t })) 
+            };
+        } else if (newType === 'random') {
+             newItem = { type: 'random', variants: targets };
+        } else if (newType === 'condition') {
+             // NEW FORMAT INITIALIZATION
+             newItem = { 
+                 type: 'condition', 
+                 conditions: [{ variable: '', operator: '>=', value: 0 }], 
+                 branches: { true: targets[0], false: targets[1] } 
+             };
         } else {
-            // Convert Random -> Choice
-            newItem = { type: 'choice', choices: (item as RandomLine).variants.map(v => ({ text: 'Next Option', nextSceneId: v })) };
+            return;
         }
         
-        // 2. Update Scene Data
+        // Update Scene Data
         const newDialogue = [...scene.dialogue];
         newDialogue[dialogueIndex] = newItem;
         onUpdateScene(sceneId, { dialogue: newDialogue });
 
-        // 3. Update Edges instantly to preserve connections
-        setEdges((eds) => eds.map((edge) => {
-            if (edge.source !== sceneId) return edge;
-            
-            // Check if this edge belongs to the swapped item
-            // Handle format: dialogue-{index}-{type}-{subIndex}
-            const parts = edge.sourceHandle?.split('-');
-            if (!parts || parseInt(parts[1]) !== dialogueIndex) return edge;
-            
-            const subIndex = parts[3]; // e.g. '0' from 'choice-0' or 'random-0'
-            
-            if (currentType === 'choice') {
-                // Switching TO Random
-                return {
-                    ...edge,
-                    sourceHandle: `dialogue-${dialogueIndex}-random-${subIndex}`,
-                    style: { strokeWidth: 2, stroke: '#a855f7', strokeDasharray: '5,5' },
-                    markerEnd: { type: MarkerType.ArrowClosed, color: '#a855f7' }
-                };
-            } else {
-                // Switching TO Choice
-                return {
-                    ...edge,
-                    sourceHandle: `dialogue-${dialogueIndex}-choice-${subIndex}`,
-                    style: { strokeWidth: 2, stroke: 'rgb(var(--accent-rgb))', strokeDasharray: '0' },
-                    markerEnd: { type: MarkerType.ArrowClosed, color: 'rgb(var(--accent-rgb))' }
-                };
-            }
-        }));
-  }, [onUpdateScene, setEdges]);
+        // Force edge refresh logic is handled by ReactFlow diffing usually, 
+        // but we might need to ensure handles update correctly.
+        // The `setNodes` in `useEffect` will handle re-rendering handles.
+  }, [onUpdateScene]);
 
   useEffect(() => {
     const newNodes: Node[] = Object.values(scenes).map((scene: Scene) => ({
@@ -493,13 +632,14 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
         onDeleteScene,
         isSelectionMode: !!selectionMode,
         selectionState: contextIds.includes(scene.id) ? 'context' : (targetId === scene.id ? 'target' : 'none'),
+        showLogicLens,
         onNodeClick: handleNodeClick,
+        onSceneSelect,
         onSwapEntryType
        },
     }));
 
-    // Reconstruct edges only if they haven't been handled by swap logic or if scene structure changes drastically
-    // We filter out edges that might be stale, but React Flow usually handles ID matching.
+    // Reconstruct edges
     const newEdges: Edge[] = [];
     Object.values(scenes).forEach((scene: Scene) => {
       scene.dialogue.forEach((item, index) => {
@@ -547,14 +687,39 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
                     });
                 }
             });
+        } else if (item.type === 'condition') {
+            if (item.branches.true) {
+                const portId = `dialogue-${index}-condition-true`;
+                newEdges.push({
+                    id: `e-${scene.id}-${portId}-${item.branches.true}`,
+                    source: scene.id,
+                    target: item.branches.true,
+                    sourceHandle: portId,
+                    type: 'default',
+                    data: { onDeleteEdge },
+                    markerEnd: { type: MarkerType.ArrowClosed, color: '#22c55e' }, // Green
+                    style: { strokeWidth: 2, stroke: '#22c55e' }
+                });
+            }
+            if (item.branches.false) {
+                const portId = `dialogue-${index}-condition-false`;
+                newEdges.push({
+                    id: `e-${scene.id}-${portId}-${item.branches.false}`,
+                    source: scene.id,
+                    target: item.branches.false,
+                    sourceHandle: portId,
+                    type: 'default',
+                    data: { onDeleteEdge },
+                    markerEnd: { type: MarkerType.ArrowClosed, color: '#ef4444' }, // Red
+                    style: { strokeWidth: 2, stroke: '#ef4444' }
+                });
+            }
         }
       });
     });
     setNodes(newNodes);
-    // Only update edges from scratch if the count differs significantly to avoid jitter,
-    // but generally React Flow diffs well. 
     setEdges(newEdges);
-  }, [scenes, onUpdateScene, onDeleteScene, onDeleteEdge, selectionMode, contextIds, targetId, onSwapEntryType]);
+  }, [scenes, onUpdateScene, onDeleteScene, onDeleteEdge, selectionMode, contextIds, targetId, onSwapEntryType, onSceneSelect, showLogicLens]);
   
   const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
     onUpdateScene(node.id, { position: node.position });
@@ -624,7 +789,7 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
 
   return (
     <div className="flex-grow bg-transparent w-full h-full relative">
-       <div className="absolute top-4 left-4 z-10 flex gap-2">
+       <div className="absolute top-4 left-4 z-10 flex gap-2 flex-wrap">
           <button
             onClick={handleAddNode}
             className="px-4 py-2 bg-secondary text-secondary-foreground text-sm font-semibold rounded-md shadow-lg hover:bg-secondary/90"
@@ -642,6 +807,12 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
             className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-lg hover:bg-primary/90"
           >
             {selectionMode ? 'Cancel Selection' : 'Generate Dialogue'}
+          </button>
+          <button
+             onClick={() => setShowLogicLens(!showLogicLens)}
+             className={`px-4 py-2 text-sm font-semibold rounded-md shadow-lg hover:opacity-90 transition-colors ${showLogicLens ? 'bg-purple-600 text-white' : 'bg-secondary text-secondary-foreground'}`}
+          >
+             {showLogicLens ? '👁️ Hide Logic' : '👁️ Logic Lens'}
           </button>
        </div>
        

@@ -1,5 +1,5 @@
 
-import { Character, CharactersData, Choice, Scene, ScenesData, DialogueLength, AIPromptLine, StatRequirement } from '../../types.ts';
+import { Character, CharactersData, Choice, Scene, ScenesData, DialogueLength, AIPromptLine, StatRequirement, Condition } from '../../types.ts';
 
 const commonInputClass = "bg-card/80 border-border rounded p-1 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none w-full";
 const commonSelectClass = "bg-card/80 border-border rounded p-1 text-sm focus:ring-1 focus:ring-ring focus:border-ring outline-none";
@@ -523,6 +523,166 @@ export class RandomTool {
             }
         });
         return { variants };
+    }
+}
+
+export class ConditionTool {
+    private data: { conditions: Condition[]; branches: { true: string; false: string; } };
+    private scenes: ScenesData;
+    private variables: string[];
+    private wrapper: HTMLDivElement | null = null;
+    private conditionsContainer: HTMLDivElement | null = null;
+
+    static get isInline() { return false; }
+    static get toolbox() { return { title: 'If Condition', icon: '⚡' }; }
+
+    constructor({ data, config }: { data: any, config: { scenes: ScenesData, variables?: string[] }}) {
+        // Migrate legacy single-condition data if present
+        const conditions = data.conditions || [];
+        if (conditions.length === 0 && data.variable) {
+             conditions.push({ variable: data.variable, operator: data.operator || '>=', value: data.value || 0 });
+        }
+
+        this.data = {
+            conditions: conditions.length > 0 ? conditions : [{ variable: '', operator: '>=', value: 0 }],
+            branches: data.branches || { true: '', false: '' }
+        };
+        this.scenes = config.scenes;
+        this.variables = config.variables || [];
+    }
+
+    render() {
+        this.wrapper = document.createElement('div');
+        this.wrapper.className = 'pl-4 border-l-4 border-yellow-500/50 space-y-3 p-3 bg-yellow-500/5 rounded-r';
+        
+        const header = document.createElement('div');
+        header.className = "text-sm font-bold text-yellow-700 dark:text-yellow-300 mb-1 flex items-center gap-2";
+        header.innerHTML = `<span>⚡ Conditional Branch</span>`;
+        this.wrapper.appendChild(header);
+
+        this.conditionsContainer = document.createElement('div');
+        this.conditionsContainer.className = 'space-y-2';
+        this.data.conditions.forEach(c => this.addConditionRow(c));
+
+        const addButton = document.createElement('button');
+        addButton.type = 'button';
+        addButton.innerText = '+ Add Condition (AND)';
+        addButton.className = commonButtonClass;
+        addButton.onclick = () => this.addConditionRow({ variable: '', operator: '>=', value: 0 });
+
+        this.wrapper.appendChild(this.conditionsContainer);
+        this.wrapper.appendChild(addButton);
+
+        const divider = document.createElement('div');
+        divider.className = 'border-t border-border/20 my-2';
+        this.wrapper.appendChild(divider);
+
+        // Branch True
+        const trueRow = this.createBranchRow('True', 'text-green-600 dark:text-green-400', this.data.branches.true, 'branch-true');
+        this.wrapper.appendChild(trueRow);
+
+        // Branch False
+        const falseRow = this.createBranchRow('False', 'text-red-600 dark:text-red-400', this.data.branches.false, 'branch-false');
+        this.wrapper.appendChild(falseRow);
+
+        return this.wrapper;
+    }
+
+    addConditionRow(c: Condition) {
+        if (!this.conditionsContainer) return;
+        const conditionRow = document.createElement('div');
+        conditionRow.className = "flex items-center gap-2 bg-card/40 p-2 rounded border border-border/20";
+        conditionRow.setAttribute('data-condition-row', 'true');
+        
+        const ifLabel = document.createElement('span');
+        ifLabel.className = "font-mono text-xs font-bold text-foreground/70 w-6";
+        ifLabel.innerText = "IF";
+
+        const varSelect = document.createElement('select');
+        varSelect.className = "bg-background border border-border rounded px-2 py-1 text-sm flex-grow";
+        varSelect.name = "variable";
+        if (this.variables.length === 0) {
+             varSelect.add(new Option('No variables', ''));
+             varSelect.disabled = true;
+        } else {
+             this.variables.forEach(v => varSelect.add(new Option(`$${v}`, v)));
+        }
+        varSelect.value = c.variable;
+
+        const opSelect = document.createElement('select');
+        opSelect.className = "bg-background border border-border rounded px-2 py-1 text-sm w-16 text-center font-mono";
+        opSelect.name = "operator";
+        ['>', '<', '==', '>=', '<=', '!='].forEach(op => opSelect.add(new Option(op, op)));
+        opSelect.value = c.operator;
+
+        const valInput = document.createElement('input');
+        valInput.type = "number";
+        valInput.className = "bg-background border border-border rounded px-2 py-1 text-sm w-20";
+        valInput.placeholder = "0";
+        valInput.name = "value";
+        valInput.value = c.value.toString();
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.innerHTML = '&times;';
+        del.className = "text-destructive ml-1";
+        del.onclick = () => conditionRow.remove();
+
+        conditionRow.appendChild(ifLabel);
+        conditionRow.appendChild(varSelect);
+        conditionRow.appendChild(opSelect);
+        conditionRow.appendChild(valInput);
+        conditionRow.appendChild(del);
+        this.conditionsContainer.appendChild(conditionRow);
+    }
+
+    createBranchRow(label: string, colorClass: string, currentId: string, idPrefix: string) {
+        const row = document.createElement('div');
+        row.className = "flex items-center gap-2";
+        
+        const labelSpan = document.createElement('span');
+        labelSpan.className = `text-xs font-bold w-12 text-right ${colorClass}`;
+        labelSpan.innerText = `${label} →`;
+
+        const sceneSelect = document.createElement('select');
+        sceneSelect.className = `${commonSelectClass} flex-grow`;
+        sceneSelect.id = idPrefix;
+        const defaultOption = new Option('Select Scene...', '');
+        sceneSelect.add(defaultOption);
+        Object.values(this.scenes).forEach((s: Scene) => {
+            const option = new Option(s.name, s.id);
+            sceneSelect.add(option);
+        });
+        sceneSelect.value = currentId;
+
+        row.appendChild(labelSpan);
+        row.appendChild(sceneSelect);
+        return row;
+    }
+
+    save() {
+        if (!this.wrapper) return this.data;
+        
+        const conditions: Condition[] = [];
+        this.wrapper.querySelectorAll('[data-condition-row="true"]').forEach(row => {
+             const variable = (row.querySelector('select[name="variable"]') as HTMLSelectElement).value;
+             const operator = (row.querySelector('select[name="operator"]') as HTMLSelectElement).value as Condition['operator'];
+             const value = parseFloat((row.querySelector('input[name="value"]') as HTMLInputElement).value) || 0;
+             if (variable) {
+                 conditions.push({ variable, operator, value });
+             }
+        });
+
+        const branchTrue = (this.wrapper.querySelector('#branch-true') as HTMLSelectElement).value;
+        const branchFalse = (this.wrapper.querySelector('#branch-false') as HTMLSelectElement).value;
+
+        return {
+            conditions,
+            branches: {
+                true: branchTrue,
+                false: branchFalse
+            }
+        };
     }
 }
 

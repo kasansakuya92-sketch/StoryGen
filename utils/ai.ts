@@ -1,4 +1,5 @@
 
+
 // utils/ai.ts
 import { GoogleGenAI, Type } from "@google/genai";
 // FIX: Import `TextLine` to use for type assertion.
@@ -153,7 +154,8 @@ export const generateDialogueForScene = async (
     dialogueLength: DialogueLength = 'Short',
     useContinuity: boolean = true,
     desiredOutcome: 'auto' | 'transition' | 'choice' | 'end_story' | 'text_only' = 'auto',
-    userPrompt: string = ''
+    userPrompt: string = '',
+    choreographed: boolean = false
 ): Promise<DialogueItem[]> => {
   if (settings.aiProvider === 'local') {
     return generateDialogueWithLocalAI(settings.localModelUrl, scene, scenes, characters, dialogueLength, useContinuity, desiredOutcome, userPrompt);
@@ -195,6 +197,16 @@ export const generateDialogueForScene = async (
           Generate the dialogue based on this specific instruction.
       `;
   }
+  
+  let choreographedInstruction = '';
+  if (choreographed) {
+      choreographedInstruction = `
+          CHOREOGRAPHED SCENE MODE:
+          - Actively describe physical actions, movements, and facial expressions using Narrator lines ('characterId': null).
+          - Interperse dialogue with action. Do not just have a wall of text from characters.
+          - Describe the environment interacting with the characters.
+      `;
+  }
 
   const prompt = `
     ${context}
@@ -202,6 +214,7 @@ export const generateDialogueForScene = async (
     TASK:
     Based on the context, write the next ${numLines} lines of dialogue for the scene '${scene.name}'. 
     ${userInstruction}
+    ${choreographedInstruction}
     - The dialogue should be engaging and move the story forward.
     - Use the provided character descriptions (appearance, talking style) to inform their dialogue.
     - Assign dialogue to characters using their 'characterId'. Use null for a narrator.
@@ -230,7 +243,8 @@ export const generateDialogueFromNodes = async (
     targetScene: Scene,
     characters: CharactersData,
     userPrompt: string,
-    dialogueLength: DialogueLength
+    dialogueLength: DialogueLength,
+    choreographed: boolean = false
 ): Promise<TextLine[]> => {
     // For local AI, this feature could be simplified or use a different prompt structure.
     // For now, we focus on the Google AI implementation.
@@ -252,6 +266,16 @@ export const generateDialogueFromNodes = async (
       'Long': '9-12',
     };
     const numLines = lengthMap[dialogueLength];
+    
+    let choreographedInstruction = '';
+    if (choreographed) {
+        choreographedInstruction = `
+            CHOREOGRAPHED SCENE MODE:
+            - You MUST frequently use the Narrator (characterId: null) to describe physical actions, body language, and environmental changes.
+            - Break up dialogue with these action descriptions.
+            - Make the scene feel cinematic and active.
+        `;
+    }
 
     const prompt = `
         You are a visual novel writer. Your task is to write the dialogue for a specific scene based on the context of previous scenes.
@@ -273,6 +297,7 @@ export const generateDialogueFromNodes = async (
         Write the next ${numLines} lines of dialogue for the scene '${targetScene.name}'.
         - The dialogue must logically follow the events of the previous scenes.
         - ${userPrompt ? `Follow this specific instruction from the user: "${userPrompt}"` : ''}
+        ${choreographedInstruction}
         - The dialogue should only consist of 'text' items. Do not generate choices, transitions, or end the story.
         - Assign dialogue to characters using their 'characterId'. Use null for a narrator.
         - Optionally set a 'spriteId' to show emotion.
@@ -355,10 +380,11 @@ export const generateStoryPlan = async (
     settings: Settings,
     prompt: string, 
     sceneLength: SceneLength = 'Short',
-    storyType: 'branching' | 'linear' = 'branching'
+    storyType: 'branching' | 'linear' = 'branching',
+    existingCharacters?: CharactersData
 ): Promise<any> => {
     if (settings.aiProvider === 'local') {
-      return generateStoryPlanWithLocalAI(settings.localModelUrl, prompt, sceneLength, storyType);
+      return generateStoryPlanWithLocalAI(settings.localModelUrl, prompt, sceneLength, storyType, existingCharacters);
     }
 
     // Google AI Logic
@@ -370,33 +396,38 @@ export const generateStoryPlan = async (
     };
     const numScenes = lengthMap[sceneLength];
 
-    const structureInstruction = storyType === 'branching'
-      ? "The story must have at least one choice that leads to different scenes."
-      : "The story must be linear and should not contain any choices. All scene outcomes must be 'transition' or 'end_story'.";
+    let charContext = '';
+    if (existingCharacters && Object.keys(existingCharacters).length > 0) {
+        const list = Object.values(existingCharacters).map(c => 
+            `- ID: '${c.id}', Name: '${c.name}', Gender: '${c.gender}', Appearance: '${c.appearance}', Style: '${c.talkingStyle}'`
+        ).join('\n');
+        charContext = `
+        IMPORTANT: The story MUST feature the following existing characters. Use their IDs exactly in the scene details.
+        ${list}
+        You may create additional side characters if absolutely necessary, but focus on these.
+        `;
+    } else {
+        charContext = "Create a cast of characters for the story.";
+    }
 
     const fullPrompt = `
-        You are a creative writer designing a short, branching visual novel.
-        Based on the user's prompt, create a basic story plan.
-        The plan should include all characters that appear in the story (with appearance, talking style, and gender) and a list of ${numScenes} scenes that form a cohesive narrative.
-        ${structureInstruction}
-        The first scene must have the id 'start'.
-        For each scene, define its outcome:
-        - 'transition': leads directly to one other scene.
-        - 'choice': presents the player with multiple options, each leading to a different scene. (Only use if the story is branching).
-        - 'end_story': concludes a branch of the story.
-
-        IMPORTANT RULE: All 'nextSceneId' values used in 'transition' or 'choice' outcomes MUST correspond to an 'id' of another scene within this same generated plan. Do not create branches that lead to non-existent scenes.
-
-        USER PROMPT: "${prompt}"
-
-        Your output must be a single JSON object that strictly follows the provided schema.
-    `;
+    TASK:
+    Create a story plan based on the prompt: "${prompt}".
+    ${charContext}
     
+    REQUIREMENTS:
+    - Create exactly ${numScenes} scenes.
+    - The first scene must have the id 'start'.
+    - The flow should be ${storyType === 'branching' ? 'branching (scenes lead to multiple options)' : 'linear (scenes lead one to the next)'}.
+    - Ensure all 'nextSceneId' references match the IDs of the scenes you create.
+    - Return a JSON object matching the provided schema.
+    `;
+
     const response = await ai.models.generateContent({
-        model: 'gemini-2.5-pro',
+        model: 'gemini-2.5-flash',
         contents: fullPrompt,
         config: {
-            responseMimeType: 'application/json',
+            responseMimeType: "application/json",
             responseSchema: storyPlanSchema,
         },
     });
@@ -405,160 +436,6 @@ export const generateStoryPlan = async (
     return JSON.parse(jsonText);
 };
 
-const characterGenerationSchema = {
-  type: Type.OBJECT,
-  properties: {
-    name: { type: Type.STRING, description: "The character's full name. Should be creative and fitting for the prompt." },
-    appearance: { type: Type.STRING, description: "A detailed 2-3 sentence description of the character's physical appearance, clothing, and overall look." },
-    talkingStyle: { type: Type.STRING, description: "A 1-2 sentence description of the character's voice, speech patterns, and common phrases." },
-    gender: { type: Type.STRING, enum: ['male', 'female', 'trans', 'neutral'], description: "The gender of the character." }
-  },
-  required: ['name', 'appearance', 'talkingStyle', 'gender']
-};
-
-export const generateCharacterDetailsWithGoogleAI = async (prompt: string): Promise<Omit<Character, 'id' | 'sprites' | 'defaultSpriteId'>> => {
-    const ai = getGoogleAI();
-    const fullPrompt = `You are a creative character designer for a visual novel.
-    Based on the user's prompt, create a single, compelling character.
-    Generate a creative name, a detailed appearance, a distinctive talking style, and their gender.
-
-    USER PROMPT: "${prompt}"
-
-    Your output must be a single JSON object that strictly follows the provided schema.`;
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: fullPrompt,
-        config: {
-            responseMimeType: 'application/json',
-            responseSchema: characterGenerationSchema,
-        },
-    });
-
-    const jsonText = response.text.trim();
-    return JSON.parse(jsonText);
-};
-
-export const generateCharacterDetails = async (
-    settings: Settings, 
-    prompt: string
-): Promise<Omit<Character, 'id' | 'sprites' | 'defaultSpriteId'>> => {
-    if (settings.aiProvider === 'local') {
-        return generateCharacterDetailsWithLocalAI(settings.localModelUrl, prompt);
-    }
-    return generateCharacterDetailsWithGoogleAI(prompt);
-};
-
-const sceneStructureSchema = {
-    type: Type.OBJECT,
-    properties: {
-        scenes: {
-            type: Type.ARRAY,
-            description: "An array of new scenes to be created.",
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    id: { type: Type.STRING, description: "A temporary, unique, lowercase_snake_case id for this new scene (e.g., 'choice_point', 'outcome_a')." },
-                    name: { type: Type.STRING, description: "A short, descriptive name for the scene." },
-                    description: { type: Type.STRING, description: "A one or two-sentence summary of what happens in this scene." },
-                    characterIds: {
-                        type: Type.ARRAY,
-                        description: "An array of character IDs present in this scene. Must be from the provided character list.",
-                        items: { type: Type.STRING }
-                    },
-                    dialogue: {
-                        type: Type.ARRAY,
-                        description: "An array of 2-4 dialogue text lines for this scene.",
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                type: { type: Type.STRING, enum: ['text'] },
-                                characterId: { type: Type.STRING, description: "The ID of the character speaking. Use null for a narrator." },
-                                spriteId: { type: Type.STRING, description: "Optional. The ID of the sprite to show." },
-                                text: { type: Type.STRING, description: "The line of dialogue." },
-                            },
-                            required: ['type', 'text', 'characterId']
-                        }
-                    }
-                },
-                required: ['id', 'name', 'description', 'characterIds', 'dialogue']
-            }
-        },
-        connections: {
-            type: Type.OBJECT,
-            description: "Defines how the new scenes connect to the source scene and to each other.",
-            properties: {
-                sourceSceneConnection: {
-                    type: Type.OBJECT,
-                    description: "How the source scene connects to the new structure. Will be a transition, choice, or random.",
-                    properties: {
-                         type: { type: Type.STRING, enum: ['transition', 'choice', 'random'] },
-                         nextSceneId: { type: Type.STRING, description: "For a 'transition', the temporary ID of the first new scene." },
-                         choices: {
-                            type: Type.ARRAY,
-                            description: "For a 'choice', an array of choices.",
-                            items: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    text: { type: Type.STRING, description: "The text for the choice option." },
-                                    nextSceneId: { type: Type.STRING, description: "The temporary ID of the scene this choice leads to." }
-                                },
-                                required: ['text', 'nextSceneId']
-                            }
-                         },
-                         variants: {
-                            type: Type.ARRAY,
-                            description: "For a 'random', an array of temporary scene IDs.",
-                            items: { type: Type.STRING }
-                         }
-                    },
-                    required: ['type']
-                },
-                internalConnections: {
-                    type: Type.ARRAY,
-                    description: "An array defining connections between the newly generated scenes.",
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            sourceSceneId: { type: Type.STRING, description: "The temporary ID of the source scene for this connection." },
-                            outcome: {
-                                type: Type.OBJECT,
-                                description: "The outcome object to add to the source scene's dialogue.",
-                                properties: {
-                                    type: { type: Type.STRING, enum: ['transition', 'choice', 'random'] },
-                                    nextSceneId: { type: Type.STRING, description: "For a 'transition', the temporary ID of the target scene." },
-                                    choices: {
-                                        type: Type.ARRAY,
-                                        description: "For a 'choice', an array of choices.",
-                                        items: {
-                                            type: Type.OBJECT,
-                                            properties: {
-                                                text: { type: Type.STRING, description: "The text for the choice option." },
-                                                nextSceneId: { type: Type.STRING, description: "The temporary ID of the scene this choice leads to." }
-                                            },
-                                            required: ['text', 'nextSceneId']
-                                        }
-                                    },
-                                    variants: {
-                                        type: Type.ARRAY,
-                                        description: "For a 'random', an array of temporary scene IDs.",
-                                        items: { type: Type.STRING }
-                                     }
-                                },
-                                required: ['type']
-                            }
-                        },
-                        required: ['sourceSceneId', 'outcome']
-                    }
-                }
-            },
-            required: ['sourceSceneConnection']
-        }
-    },
-    required: ['scenes', 'connections']
-};
-
-
 export const generateSceneStructure = async (
     settings: Settings,
     contextScenes: Scene[],
@@ -566,7 +443,7 @@ export const generateSceneStructure = async (
     characters: CharactersData,
     prompt: string,
     structureType: AIStructureType,
-    branchCount: number = 2,
+    branchCount: number
 ): Promise<{ scenes: AIGeneratedScene[], connections: any }> => {
     if (settings.aiProvider === 'local') {
         return generateSceneStructureWithLocalAI(settings.localModelUrl, contextScenes, sourceScene, characters, prompt, structureType, branchCount);
@@ -577,79 +454,141 @@ export const generateSceneStructure = async (
     const storySoFar = contextScenes.map((s, index) => `${index + 1}. Scene '${s.name}': ${s.description}`).join('\n');
     
     let structureDescription = '';
-    let exampleStructure = '';
-    
     if (structureType === 'choice_branch') {
-        structureDescription = `
-            The structure should be a "Choice Branch":
-            1.  One new scene that introduces a choice.
-            2.  ${branchCount} new scenes representing the different outcomes of that choice.
-            Total scenes to generate: ${1 + branchCount}.
-            The source scene ('${sourceScene.name}') should transition to the new choice scene. The choice scene should then offer ${branchCount} choices, each leading to one of the new outcome scenes.
-        `;
+        structureDescription = `The structure should be a "Choice Branch": create ${1 + branchCount} new scenes. The source scene transitions to the first new scene (Choice Scene). The choice scene offers ${branchCount} choices, each leading to one of the other ${branchCount} new scenes (Outcome Scenes).`;
     } else if (structureType === 'random_branch') {
-        structureDescription = `
-            The structure should be a "Random Branch":
-            1.  One new scene (the 'Randomizer' scene) that determines a random outcome.
-            2.  ${branchCount} new outcome scenes.
-            Total scenes to generate: ${1 + branchCount}.
-            The source scene ('${sourceScene.name}') should transition to the 'Randomizer' scene.
-            The 'Randomizer' scene must contain a 'random' outcome block with exactly ${branchCount} variants in its 'variants' array.
-            Each variant in the 'variants' array must be the temporary ID of one of the ${branchCount} outcome scenes.
-        `;
+        structureDescription = `The structure should be a "Random Branch": create ${1 + branchCount} new scenes. The source scene transitions to the first new scene (Randomizer). The randomizer scene has a 'random' outcome with ${branchCount} variants, each pointing to one of the outcome scenes.`;
     } else { // linear_sequence
-        structureDescription = `
-            The structure should be a "Linear Sequence":
-            1.  ${branchCount} new scenes that follow each other in order.
-            Total scenes to generate: ${branchCount}.
-            The source scene ('${sourceScene.name}') should transition to the first new scene. The first new scene should transition to the second, and so on.
-        `;
+        structureDescription = `The structure should be a "Linear Sequence": create ${branchCount} new scenes that follow each other in order.`;
     }
 
-
     const fullPrompt = `
-        You are a visual novel writer. Your task is to generate a small group of interconnected scenes based on a prompt and a requested structure, which will be added after a specified "source scene".
+    CONTEXT:
+    CHARACTERS IN THIS STORY:
+    ${characterDescriptions}
+    STORY SO FAR (based on selected context scenes):
+    ${storySoFar}
+    The new scenes will connect FROM this scene:
+    - Source Scene: '${sourceScene.name}' (id: ${sourceScene.id}): ${sourceScene.description}
+    ---
+    TASK:
+    Based on the user's prompt, generate a new scene structure.
+    USER PROMPT: "${prompt}"
+    REQUESTED STRUCTURE: ${structureDescription}
 
-        ---
-        CONTEXT:
-        
-        CHARACTERS IN THIS STORY:
-        ${characterDescriptions}
-
-        STORY SO FAR (based on selected context scenes):
-        ${storySoFar}
-
-        The new scenes will connect FROM this scene:
-        - Source Scene: '${sourceScene.name}' (id: ${sourceScene.id}): ${sourceScene.description}
-
-        ---
-        TASK:
-        Based on the user's prompt, generate a new scene structure.
-
-        USER PROMPT: "${prompt}"
-
-        REQUESTED STRUCTURE:
-        ${structureDescription}
-
-        INSTRUCTIONS:
-        - Create all the scenes and the connections between them.
-        - Each scene needs a temporary unique ID, a name, a description, a list of character IDs present, and 2-4 lines of dialogue.
-        - Define how the source scene connects to the new structure, and how the new scenes connect to each other.
-        - If creating a choice or random branch, ensure you generate exactly ${branchCount} outcome scenes.
-        - The dialogue should only consist of 'text' items.
-        - Ensure all IDs used in connections match the temporary IDs of the generated scenes.
-        - Your output must be a single, valid JSON object that strictly follows the provided schema.
+    INSTRUCTIONS:
+    - The "scenes" key must be an array of ${structureType === 'linear_sequence' ? branchCount : 1 + branchCount} new scene objects. Each must have a temporary 'id', 'name', 'description', 'characterIds', and a short 'dialogue' array (text only).
+    - The "connections" key must be an object. It needs a "sourceSceneConnection" (how the source scene connects to the new structure) and "internalConnections" (how new scenes connect to each other).
+    - All 'nextSceneId' and 'sourceSceneId' values in the connections MUST match the temporary 'id's of the scenes you generate.
     `;
-
+    
     const response = await ai.models.generateContent({
-        model: 'gemini-2.5-pro', // Use a more powerful model for this complex task
+        model: 'gemini-2.5-flash',
         contents: fullPrompt,
         config: {
             responseMimeType: "application/json",
-            responseSchema: sceneStructureSchema,
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    scenes: {
+                        type: Type.ARRAY,
+                         items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                id: { type: Type.STRING },
+                                name: { type: Type.STRING },
+                                description: { type: Type.STRING },
+                                characterIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                dialogue: textOnlyDialogueSchema
+                            },
+                            required: ['id', 'name', 'description', 'characterIds', 'dialogue']
+                        }
+                    },
+                    connections: {
+                        type: Type.OBJECT,
+                        properties: {
+                            sourceSceneConnection: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    type: { type: Type.STRING, enum: ['transition', 'choice'] },
+                                    nextSceneId: { type: Type.STRING },
+                                    choices: {
+                                        type: Type.ARRAY,
+                                        items: { type: Type.OBJECT, properties: { text: { type: Type.STRING }, nextSceneId: { type: Type.STRING } } }
+                                    }
+                                },
+                                required: ['type']
+                            },
+                            internalConnections: {
+                                type: Type.ARRAY,
+                                items: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        sourceSceneId: { type: Type.STRING },
+                                        outcome: {
+                                            type: Type.OBJECT,
+                                            properties: {
+                                                type: { type: Type.STRING, enum: ['transition', 'choice', 'random'] },
+                                                nextSceneId: { type: Type.STRING },
+                                                choices: {
+                                                     type: Type.ARRAY,
+                                                     items: { type: Type.OBJECT, properties: { text: { type: Type.STRING }, nextSceneId: { type: Type.STRING } } }
+                                                },
+                                                variants: { type: Type.ARRAY, items: { type: Type.STRING } }
+                                            },
+                                            required: ['type']
+                                        }
+                                    },
+                                    required: ['sourceSceneId', 'outcome']
+                                }
+                            }
+                        },
+                        required: ['sourceSceneConnection', 'internalConnections']
+                    }
+                },
+                required: ['scenes', 'connections']
+            }
         },
     });
+    
+    return JSON.parse(response.text.trim());
+};
 
-    const jsonText = response.text.trim();
-    return JSON.parse(jsonText);
+
+export const generateCharacterDetails = async (
+    settings: Settings,
+    prompt: string
+): Promise<Omit<Character, 'id' | 'sprites' | 'defaultSpriteId'>> => {
+    if (settings.aiProvider === 'local') {
+        return generateCharacterDetailsWithLocalAI(settings.localModelUrl, prompt);
+    }
+
+    const ai = getGoogleAI();
+    
+    const fullPrompt = `You are a creative character designer for a visual novel. Based on the user's prompt, create a single, compelling character.
+
+    Respond with a single valid JSON object with keys: "name", "appearance", "talkingStyle", and "gender".
+    
+    USER PROMPT: "${prompt}"
+    `;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: fullPrompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    name: { type: Type.STRING },
+                    appearance: { type: Type.STRING },
+                    talkingStyle: { type: Type.STRING },
+                    gender: { type: Type.STRING, enum: ['male', 'female', 'trans', 'neutral'] }
+                },
+                required: ['name', 'appearance', 'talkingStyle', 'gender']
+            }
+        }
+    });
+
+    return JSON.parse(response.text.trim());
 };

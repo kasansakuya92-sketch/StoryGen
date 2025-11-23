@@ -3,7 +3,7 @@
 import React, { useRef, useEffect, useMemo } from 'react';
 // FIX: Add `Character` to imports to be used for explicit typing.
 import { DialogueItem, Scene, ScenesData, CharactersData, Settings, TextLine, ChoiceLine, Transition, EndStory, AIPromptLine, ImageLine, VideoLine, Character, TransferLine, RandomLine } from '../../types.ts';
-import { TextTool, ChoiceTool, TransitionTool, EndStoryTool, AIPromptTool, ImageTool, VideoTool, TransferTool, RandomTool } from './tools.ts';
+import { TextTool, ChoiceTool, TransitionTool, EndStoryTool, AIPromptTool, ImageTool, VideoTool, TransferTool, RandomTool, ConditionTool } from './tools.ts';
 import { generateDialogueForScene } from '../../utils/ai.ts';
 
 // Make EditorJS globally available for TS
@@ -32,6 +32,8 @@ const toEditorJSData = (dialogue: DialogueItem[]) => {
                 return { type: 'transfer', data: { nextSceneId: item.nextSceneId } };
             case 'random':
                 return { type: 'random', data: { variants: item.variants } };
+            case 'condition':
+                return { type: 'condition', data: { conditions: item.conditions, branches: item.branches } };
             case 'end_story':
                 return { type: 'endStory', data: {} };
             case 'ai_prompt':
@@ -65,6 +67,8 @@ const fromEditorJSData = (editorData: any): DialogueItem[] => {
                 return { type: 'transfer', nextSceneId: block.data.nextSceneId || '' };
             case 'random':
                 return { type: 'random', variants: block.data.variants || [] };
+            case 'condition':
+                return { type: 'condition', conditions: block.data.conditions || [], branches: block.data.branches || { true: '', false: '' } };
             case 'endStory':
                 return { type: 'end_story' };
             case 'aiPrompt':
@@ -119,7 +123,8 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, scenes, characte
             const promptBlockIndex = editorInstance.current.blocks.getCurrentBlockIndex();
 
             try {
-                const newItems = await generateDialogueForScene(settings, scene, scenes, characters, config.dialogueLength, config.useContinuity, config.desiredOutcome, config.aiPrompt);
+                // Note: Passing 'false' for choreographed as it's not exposed in this specific inline tool config yet.
+                const newItems = await generateDialogueForScene(settings, scene, scenes, characters, config.dialogueLength, config.useContinuity, config.desiredOutcome, config.aiPrompt, false);
                 
                 const newEditorBlocks = toEditorJSData(newItems).blocks;
                 
@@ -173,6 +178,10 @@ const DialogueEditor: React.FC<DialogueEditorProps> = ({ scene, scenes, characte
                 random: {
                     class: RandomTool,
                     config: { scenes },
+                },
+                condition: {
+                    class: ConditionTool,
+                    config: { scenes, variables }
                 },
                 endStory: EndStoryTool,
                 image: ImageTool,

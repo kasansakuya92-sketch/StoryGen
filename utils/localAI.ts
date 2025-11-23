@@ -31,7 +31,6 @@ const getStoryContext = (scenes: ScenesData, characters: CharactersData, current
       }).join('\n');
 
       if (dialogueLines) {
-          // FIX: Corrected typo from `dialogLines` to `dialogueLines`.
           recentDialogue = `\nRECENT DIALOGUE IN THIS SCENE:\n${dialogueLines}`;
       }
   }
@@ -240,14 +239,27 @@ export const generateStoryPlanWithLocalAI = async (
     url: string,
     prompt: string, 
     sceneLength: SceneLength = 'Short',
-    storyType: 'branching' | 'linear' = 'branching'
+    storyType: 'branching' | 'linear' = 'branching',
+    existingCharacters?: CharactersData
 ): Promise<any> => {
     // New multi-step logic for simpler local models
     const lengthMap = { 'Short': '3-4', 'Medium': '5-6', 'Long': '7-8' };
     const numScenes = lengthMap[sceneLength];
 
-    // STEP 1: Generate Characters
-    const charactersPrompt = `You are a creative writer. Based on the user's prompt, create all characters that appear in the story.
+    let characters: { id: string; name: string; appearance: string; talkingStyle: string; gender: string }[] = [];
+
+    if (existingCharacters && Object.keys(existingCharacters).length > 0) {
+        // STEP 1 (SKIPPED): Use existing characters
+        characters = Object.values(existingCharacters).map(c => ({
+            id: c.id,
+            name: c.name,
+            appearance: c.appearance || 'No description.',
+            talkingStyle: c.talkingStyle || 'No description.',
+            gender: c.gender || 'neutral'
+        }));
+    } else {
+        // STEP 1: Generate Characters
+        const charactersPrompt = `You are a creative writer. Based on the user's prompt, create all characters that appear in the story.
 
 Respond with a valid JSON array of character objects. Each object should have a short, lowercase 'id', a 'name', an 'appearance' description, a 'talkingStyle' description, and a 'gender' (one of 'male', 'female', 'trans', 'neutral'). Do not add any explanations or markdown.
 
@@ -261,17 +273,18 @@ EXAMPLE JSON OUTPUT:
   { "id": "kai", "name": "Kai", "appearance": "Wears a worn leather jacket and has a scar over his left eye.", "talkingStyle": "Speaks quickly and with a lot of technical jargon.", "gender": "male" },
   { "id": "lena", "name": "Lena", "appearance": "Has long, silver hair and prefers elegant, flowing robes.", "talkingStyle": "Calm, measured, and speaks very formally.", "gender": "female" }
 ]`;
-    
-    // Type guard for character objects
-    const isCharacter = (item: any): item is { id: string; name: string; appearance: string; talkingStyle: string; gender: string } => {
-        return typeof item === 'object' && item !== null && typeof item.id === 'string' && typeof item.name === 'string' && typeof item.appearance === 'string' && typeof item.talkingStyle === 'string';
-    };
-    
-    const rawCharactersResponse = await postToLocalModel(url, [
-        { role: 'system', content: "You are an AI assistant that only responds in valid JSON format." },
-        { role: 'user', content: charactersPrompt },
-    ]);
-    const characters = extractArrayFromResponse(rawCharactersResponse, isCharacter);
+        
+        // Type guard for character objects
+        const isCharacter = (item: any): item is { id: string; name: string; appearance: string; talkingStyle: string; gender: string } => {
+            return typeof item === 'object' && item !== null && typeof item.id === 'string' && typeof item.name === 'string' && typeof item.appearance === 'string' && typeof item.talkingStyle === 'string';
+        };
+        
+        const rawCharactersResponse = await postToLocalModel(url, [
+            { role: 'system', content: "You are an AI assistant that only responds in valid JSON format." },
+            { role: 'user', content: charactersPrompt },
+        ]);
+        characters = extractArrayFromResponse(rawCharactersResponse, isCharacter);
+    }
 
 
     // STEP 2: Generate Scene Outline
@@ -366,21 +379,25 @@ EXAMPLE JSON OUTPUT for a transition:
     }
 
     // STEP 4: Assemble and return final plan
-    const finalCharacters = characters.map(c => {
-        const validGenders = ['male', 'female', 'trans', 'neutral'];
-        const gender = validGenders.includes(c.gender) ? c.gender : 'neutral';
-        return {
-            ...c,
-            gender: gender as 'male' | 'female' | 'trans' | 'neutral',
-            defaultSpriteId: 'normal',
-            sprites: [{ id: 'normal', url: `https://picsum.photos/seed/${c.id}/600/800` }],
-        };
-    });
+    let finalCharactersData: CharactersData = {};
 
-    const finalCharactersData: CharactersData = {};
-    finalCharacters.forEach(c => {
-        finalCharactersData[c.id] = c;
-    });
+    if (existingCharacters && Object.keys(existingCharacters).length > 0) {
+        finalCharactersData = existingCharacters;
+    } else {
+        const finalCharacters = characters.map(c => {
+            const validGenders = ['male', 'female', 'trans', 'neutral'];
+            const gender = validGenders.includes(c.gender) ? c.gender : 'neutral';
+            return {
+                ...c,
+                gender: gender as 'male' | 'female' | 'trans' | 'neutral',
+                defaultSpriteId: 'normal',
+                sprites: [{ id: 'normal', url: `https://picsum.photos/seed/${c.id}/600/800` }],
+            };
+        });
+        finalCharacters.forEach(c => {
+            finalCharactersData[c.id] = c;
+        });
+    }
 
     return { characters: finalCharactersData, scenes };
 };

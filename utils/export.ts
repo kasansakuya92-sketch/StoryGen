@@ -11,7 +11,8 @@ export const exportProjectAsJson = (project: Project) => {
 // --- Legacy Engine Export Logic ---
 
 // Helper to replace single quotes with <punc>
-const formatText = (text: string): string => {
+const formatText = (text: string | undefined | null): string => {
+    if (!text) return ""; 
     return text.replace(/'/g, "<punc>");
 };
 
@@ -191,6 +192,10 @@ export const exportStoryAsTwee = (story: Story) => {
                         if(vId) visit(vId);
                     });
                 }
+                if (item.type === 'condition') {
+                    if (item.branches.true) visit(item.branches.true);
+                    if (item.branches.false) visit(item.branches.false);
+                }
              });
         }
         visiting.delete(sceneId);
@@ -209,8 +214,8 @@ export const exportStoryAsTwee = (story: Story) => {
         const varName = varMap.get(sceneId);
         
         if (scene && varName) {
-            const serialized = serializeSceneForTwee(scene, story, varMap);
-            content += `<<set ${varName} = ${serialized}>>\n\n`;
+            const serialized = serializeSceneForTwee(scene, story, varMap, varName);
+            content += serialized + `\n\n`;
         }
     });
 
@@ -235,42 +240,72 @@ export const exportStoryAsTwee = (story: Story) => {
     downloadFile(output, `${story.name.replace(/\s+/g, '_')}.twee`);
 };
 
-// Recursion depth tracker to prevent infinite loops in random blocks if scene references itself
-const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, string>, depth = 0): string => {
-    if (depth > 5) return "[]"; // Safety break
+// Helper to create the "Continue" choice object structure
+const createContinueObject = (targetVar: string) => {
+    return {
+        character: "",
+        gender: "na",
+        type: "choice",
+        text: "",
+        choices: [{
+            text: "Continue",
+            type: "choice", 
+            result: targetVar 
+        }]
+    };
+};
 
-    const segments: string[] = [];
+// Recursion depth tracker to prevent infinite loops
+const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, string>, varName: string, depth = 0): string => {
+    if (depth > 5) return `<<set ${varName} = []>>`; // Safety break
+
+    let output = `<<set ${varName} = []>>\n`;
     let currentBuffer: any[] = [];
 
     const flushBuffer = () => {
         if (currentBuffer.length > 0) {
-            segments.push(customStringify(currentBuffer));
+            output += `<<set ${varName} = ${varName}.concat(${customStringify(currentBuffer)})>>\n`;
             currentBuffer = [];
         }
     };
     
     scene.dialogue.forEach(item => {
-        // 1. Handle Random Blocks (which break the linear array structure)
+        // 1. Handle Random Blocks
         if (item.type === 'random') {
             flushBuffer();
+            // Placeholder
+            return; 
+        }
+
+        // 2. Handle Condition Blocks
+        if (item.type === 'condition') {
+            flushBuffer();
             
-            const variants = item.variants.map(variantSceneId => {
-                const variantScene = story.scenes[variantSceneId];
-                if (variantScene) {
-                    // Recursively serialize the content of the referenced scene inline
-                    return serializeSceneForTwee(variantScene, story, varMap, depth + 1);
+            // Build the IF statement. Stacked Conditions: AND logic
+            const conditions = item.conditions.map(c => `$${c.variable} ${c.operator} ${c.value}`).join(' and ');
+            
+            output += `<<if ${conditions}>>\n`;
+            if (item.branches.true) {
+                const targetVar = varMap.get(item.branches.true);
+                if (targetVar) {
+                    const continueObj = createContinueObject(targetVar);
+                    output += `   <<set ${varName} = ${varName}.concat([${customStringify(continueObj)}])>>\n`;
                 }
-                return "[]";
-            });
-            
-            if (variants.length > 0) {
-                segments.push(`either(${variants.join(', ')})`);
             }
-            return; // Skip standard processing for this item
+            output += `<<else>>\n`;
+            if (item.branches.false) {
+                const targetVar = varMap.get(item.branches.false);
+                if (targetVar) {
+                     const continueObj = createContinueObject(targetVar);
+                     output += `   <<set ${varName} = ${varName}.concat([${customStringify(continueObj)}])>>\n`;
+                }
+            }
+            output += `<</if>>\n`;
+            return;
         }
 
 
-        // 2. Standard Processing
+        // 3. Standard Processing
         let charName = "", gender = "neutral";
         const characterId = 'characterId' in item ? item.characterId : null;
         if (characterId) {
@@ -285,10 +320,10 @@ const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, s
         // Special handling for Narration vs Empty character
         if (!characterId) {
             if (item.type === 'video') {
-                charName = ""; 
+                charName = "Narrator"; // Fallback
                 gender = "na"; 
             } else if (item.type === 'image') {
-                charName = "";
+                charName = "Narrator"; // Fallback
                 gender = "na";
             } else if (!charName) {
                 charName = "Narrator"; 
@@ -321,7 +356,7 @@ const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, s
                     // Map result, stats, and optional type override
                     return { 
                         text: formatText(c.text), 
-                        type: c.type || undefined, // Only add type if explicitly set (e.g. 'transfer')
+                        type: c.type || "choice", // Explicitly default to choice for standard choices
                         result: nextVar || null, // Use actual null value for cleaner export
                         statRequirements: c.statRequirements,
                         statChanges: c.statChanges
@@ -331,7 +366,8 @@ const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, s
                 break;
              case 'transition':
                 const transNextVar = item.nextSceneId ? varMap.get(item.nextSceneId) : null;
-                currentBuffer.push({ ...base, type: 'choice', text: "", choices: [{ text: "Continue", result: transNextVar || null }] });
+                // Replaced 'transition' type with 'choice' -> 'Continue' for renderer compatibility
+                currentBuffer.push(createContinueObject(transNextVar || ''));
                 break;
              case 'transfer':
                 const trfNextVar = item.nextSceneId ? varMap.get(item.nextSceneId) : null;
@@ -345,16 +381,7 @@ const serializeSceneForTwee = (scene: Scene, story: Story, varMap: Map<string, s
     });
 
     flushBuffer();
-
-    if (segments.length === 0) return "[]";
-    if (segments.length === 1) return segments[0];
-
-    // Join with .concat() to flatten arrays in JS/Twee
-    // Example: [A, B].concat(either([C], [D])).concat([E])
-    return segments.reduce((acc, curr, index) => {
-        if (index === 0) return curr;
-        return `${acc}.concat(${curr})`;
-    }, "");
+    return output;
 };
 
 const customStringify = (obj: any): string => {
@@ -374,8 +401,7 @@ const customStringify = (obj: any): string => {
             if (key === 'result' && typeof value === 'string' && value.startsWith('$')) {
                  return `${key}: ${value}`;
             }
-             // Quote keys for standard JSON compatibility, though Twee often accepts unquoted.
-             // Safe to use unquoted if simple, but let's stick to simple key output unless special chars.
+             // Quote keys for standard JSON compatibility
              const keyStr = /^[a-zA-Z0-9_]+$/.test(key) ? key : `"${key}"`;
              return `${keyStr}: ${customStringify(value)}`;
         }).filter(Boolean).join(', ');
@@ -436,6 +462,7 @@ export const importStoryFromTwee = (tweeContent: string, currentProjectCharacter
     if (isEngineFormat) {
         // --- PARSE ENGINE FORMAT ---
         // Look for <<set $VarName = [...]>>
+        // Updated regex to be more permissive with content inside []
         const variableRegex = /<<set\s+(\$[\w\d_]+)\s*=\s*(\[[\s\S]*?\])>>/g;
         let match;
 
@@ -449,16 +476,10 @@ export const importStoryFromTwee = (tweeContent: string, currentProjectCharacter
             // Fix loose keys if necessary (export produces valid keys, but just in case)
             jsonString = jsonString.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
 
-            // Attempt to handle .concat() in import (Basic support only)
-            // If jsonString contains .concat, it's advanced structure.
-            // We might need to split by .concat and parse parts, but `JSON.parse` won't handle functions.
-            // For simple re-importing, we might just skip the random parts or log warning,
-            // OR attempt to strip .concat wrappers if simple.
-            // Given the complexity, we'll wrap parse in try-catch and maybe fallback or simplistic parsing.
-            // NOTE: This import logic is basic. Supporting re-import of .concat structures requires a JS parser.
-            // We will assume standard array parsing for now.
-
             try {
+                // Attempt to parse. Note: if the file used .concat, this regex might not capture the full block if it's split.
+                // Ideally, we'd need a parser that understands the <<set ...>> structure fully.
+                // For now, we assume basic arrays.
                 const data = JSON.parse(jsonString);
                 const sceneId = generateId('scene');
                 varMap.set(varName, sceneId);

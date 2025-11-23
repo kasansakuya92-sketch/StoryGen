@@ -1,3 +1,5 @@
+
+
 import React, { useState } from 'react';
 import { Scene, CharactersData, ScenesData, DialogueLength, TextLine } from '../types.ts';
 import { generateDialogueFromNodes } from '../utils/ai.ts';
@@ -24,6 +26,7 @@ const AIGenerationModal: React.FC<AIGenerationModalProps> = ({
 }) => {
   const [prompt, setPrompt] = useState('');
   const [dialogueLength, setDialogueLength] = useState<DialogueLength>('Medium');
+  const [choreographed, setChoreographed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { settings } = useSettings();
@@ -46,7 +49,8 @@ const AIGenerationModal: React.FC<AIGenerationModalProps> = ({
         targetScene,
         allCharacters,
         prompt,
-        dialogueLength
+        dialogueLength,
+        choreographed
       );
       
       const originalOutcome = targetScene.dialogue.find(d => d.type !== 'text');
@@ -108,6 +112,20 @@ const AIGenerationModal: React.FC<AIGenerationModalProps> = ({
                         options={dialogueLengthOptions} 
                         disabled={isLoading}
                     />
+                </div>
+                
+                <div className="flex items-center">
+                    <input
+                        type="checkbox"
+                        id="node-choreographed"
+                        checked={choreographed}
+                        onChange={(e) => setChoreographed(e.target.checked)}
+                        className="h-4 w-4 rounded border-border bg-card text-primary focus:ring-ring"
+                        disabled={isLoading}
+                    />
+                    <label htmlFor="node-choreographed" className="ml-2 block text-sm text-foreground/80 font-semibold">
+                        Choreographed Scene (Include Narrator Actions)
+                    </label>
                 </div>
 
                 {error && <p className="text-sm text-destructive bg-destructive/10 p-2 rounded-md">{error}</p>}

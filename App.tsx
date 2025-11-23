@@ -1,5 +1,4 @@
 
-
 import React, { useState, useCallback, useEffect } from 'react';
 import GameScreen from './components/GameScreen.tsx';
 import StartScreen from './components/StartScreen.tsx';
@@ -53,6 +52,9 @@ const AppContent: React.FC = () => {
   // Game State
   const [gameState, setGameState] = useState<GameState>('start');
   const [currentSceneId, setCurrentSceneId] = useState<string>(''); // Will be set on game start
+  
+  // Runtime Variable State for Gameplay
+  const [variableState, setVariableState] = useState<Record<string, number>>({});
 
   // Editor State
   const [editorMode, setEditorMode] = useState<EditorMode>('FORM');
@@ -61,6 +63,11 @@ const AppContent: React.FC = () => {
   const [isVariableManagerOpen, setIsVariableManagerOpen] = useState(false);
   const [isPlannerOpen, setIsPlannerOpen] = useState(false);
   const [isExplorerCollapsed, setIsExplorerCollapsed] = useState(false);
+  
+  // Node Editor Sidebar State
+  const [isNodeSidebarOpen, setIsNodeSidebarOpen] = useState(true); 
+  const [sidebarWidth, setSidebarWidth] = useState(500);
+  const [isResizing, setIsResizing] = useState(false);
 
   // Derived State
   const activeProject = activeProjectId ? projects[activeProjectId] : null;
@@ -103,6 +110,41 @@ const AppContent: React.FC = () => {
       setSelectedSceneId(null);
     }
   }, [activeStory, selectedSceneId]);
+
+  // EFFECT: Handle sidebar resizing
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+        if (!isResizing) return;
+        
+        // Calculate new width based on distance from right edge
+        const newWidth = document.body.clientWidth - e.clientX;
+        
+        // Clamp width
+        const clampedWidth = Math.max(300, Math.min(newWidth, document.body.clientWidth * 0.8));
+        setSidebarWidth(clampedWidth);
+    };
+    
+    const handleMouseUp = () => {
+        setIsResizing(false);
+    };
+
+    if (isResizing) {
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+        document.body.style.cursor = 'ew-resize';
+        document.body.style.userSelect = 'none'; // Prevent text selection while dragging
+    } else {
+        document.body.style.cursor = 'default';
+        document.body.style.userSelect = '';
+    }
+
+    return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        document.body.style.cursor = 'default';
+        document.body.style.userSelect = '';
+    };
+  }, [isResizing]);
 
 
   // Navigation Handlers
@@ -147,6 +189,7 @@ const AppContent: React.FC = () => {
   // Game Handlers
   const handleStart = useCallback(() => {
     if (activeStory) {
+      setVariableState({}); // Reset variables on start
       setCurrentSceneId(activeStory.startSceneId);
       setGameState('playing');
     } else {
@@ -155,7 +198,10 @@ const AppContent: React.FC = () => {
   }, [activeStory]);
 
   const handleEnd = useCallback(() => setGameState('end'), []);
-  const handleRestart = useCallback(() => setGameState('start'), []);
+  const handleRestart = useCallback(() => {
+      setVariableState({}); // Reset variables on restart
+      setGameState('start');
+  }, []);
 
   const handleNavigate = useCallback((nextSceneId: string) => {
     if (activeScenes && activeScenes[nextSceneId]) {
@@ -166,6 +212,16 @@ const AppContent: React.FC = () => {
     }
   }, [activeScenes]);
 
+  const handleUpdateRuntimeVariable = useCallback((updates: Record<string, number>) => {
+      setVariableState(prev => {
+          const newState = { ...prev };
+          Object.entries(updates).forEach(([key, val]) => {
+             newState[key] = (newState[key] || 0) + val; 
+          });
+          return newState;
+      });
+  }, []);
+
   // Project/Story Selection Handlers
   const handleSelectProject = (id: string) => {
     setActiveProjectId(id);
@@ -173,6 +229,11 @@ const AppContent: React.FC = () => {
 
   const handleSelectStory = (id: string) => {
     setActiveStoryId(id);
+  };
+
+  const handleSelectSceneFromNode = (id: string) => {
+      setSelectedSceneId(id);
+      setIsNodeSidebarOpen(true);
   };
 
 
@@ -599,7 +660,17 @@ const AppContent: React.FC = () => {
       case 'start':
         return <StartScreen onStart={handleStart} onGoToHub={handleGoToHub}/>;
       case 'playing':
-        return currentScene ? <GameScreen scene={currentScene} characters={activeCharacters} onNavigate={handleNavigate} onEnd={handleEnd} onOpenEditor={handleOpenEditorFromGame}/> : <EndScreen onRestart={handleRestart} onGoToHub={handleGoToHub} />;
+        return currentScene ? (
+            <GameScreen 
+                scene={currentScene} 
+                characters={activeCharacters} 
+                onNavigate={handleNavigate} 
+                onEnd={handleEnd} 
+                onOpenEditor={handleOpenEditorFromGame}
+                variableState={variableState}
+                onUpdateVariables={handleUpdateRuntimeVariable}
+            />
+        ) : <EndScreen onRestart={handleRestart} onGoToHub={handleGoToHub} />;
       case 'end':
         return <EndScreen onRestart={handleRestart} onGoToHub={handleGoToHub} />;
       default:
@@ -621,7 +692,7 @@ const AppContent: React.FC = () => {
         onGoToSettings={handleGoToSettings}
         onImportStory={handleImportStory}
       />
-      <div className="flex-grow flex overflow-hidden">
+      <div className="relative flex-grow flex overflow-hidden">
         <ProjectExplorer
           projects={projects}
           activeProjectId={activeProjectId}
@@ -641,9 +712,11 @@ const AppContent: React.FC = () => {
           isCollapsed={isExplorerCollapsed}
           onToggleCollapse={() => setIsExplorerCollapsed(p => !p)}
         />
-        {activeStory && selectedSceneForEditor && activeScenes && activeCharacters ? (
+
+        <div className="relative flex-grow h-full overflow-hidden">
+        {activeStory && activeScenes && activeCharacters ? (
           <>
-            {editorMode === 'FORM' && (
+            {editorMode === 'FORM' && selectedSceneForEditor && (
               <SceneEditor
                 key={selectedSceneId}
                 scene={selectedSceneForEditor}
@@ -653,16 +726,78 @@ const AppContent: React.FC = () => {
                 onUpdateScene={handleUpdateScene}
               />
             )}
+            
             {editorMode === 'NODE' && (
-              <NodeEditorView
-                scenes={activeScenes}
-                characters={activeCharacters}
-                onUpdateScene={handleUpdateScene}
-                activeStoryId={activeStoryId}
-                onAddScene={handleAddScene}
-                onDeleteScene={handleDeleteScene}
-                onAddSceneStructure={handleAddSceneStructure}
-              />
+                <div className="w-full h-full relative flex overflow-hidden">
+                  <div className="flex-grow h-full">
+                    <NodeEditorView
+                        scenes={activeScenes}
+                        characters={activeCharacters}
+                        onUpdateScene={handleUpdateScene}
+                        activeStoryId={activeStoryId}
+                        onAddScene={handleAddScene}
+                        onDeleteScene={handleDeleteScene}
+                        onAddSceneStructure={handleAddSceneStructure}
+                        onSceneSelect={handleSelectSceneFromNode}
+                    />
+                  </div>
+                  
+                  {/* Sliding Right Sidebar for Node View */}
+                  <div 
+                    className={`absolute top-0 right-0 h-full bg-background/90 backdrop-blur-md shadow-2xl border-l border-border z-20 flex flex-col`}
+                    style={{
+                        width: sidebarWidth,
+                        transform: isNodeSidebarOpen ? 'translateX(0)' : 'translateX(100%)',
+                        transition: isResizing ? 'none' : 'transform 0.3s ease-in-out'
+                    }}
+                  >
+                       {/* Resize Handle */}
+                       <div 
+                           className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-primary/50 z-50 bg-transparent"
+                           onMouseDown={() => setIsResizing(true)}
+                       />
+
+                      {selectedSceneForEditor ? (
+                          <div className="flex flex-col h-full overflow-hidden">
+                             <div className="flex items-center justify-between p-3 border-b border-border bg-card/50 flex-shrink-0">
+                                 <h3 className="font-bold text-sm truncate px-2">{selectedSceneForEditor.name}</h3>
+                                 <button onClick={() => setIsNodeSidebarOpen(false)} className="text-foreground/60 hover:text-foreground p-1 rounded hover:bg-secondary">
+                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                    </svg>
+                                 </button>
+                             </div>
+                             {/* Ensure flex container logic for SceneEditor to scroll */}
+                             <div className="flex-grow relative overflow-hidden flex flex-col">
+                                 <SceneEditor
+                                    key={selectedSceneId}
+                                    scene={selectedSceneForEditor}
+                                    scenes={activeScenes}
+                                    characters={activeCharacters}
+                                    variables={activeProject?.variables || []}
+                                    onUpdateScene={handleUpdateScene}
+                                />
+                             </div>
+                          </div>
+                      ) : (
+                           <div className="p-8 text-center text-foreground/50">Select a scene to edit</div>
+                      )}
+                  </div>
+                  
+                  {/* Toggle Button if Sidebar is closed */}
+                  {!isNodeSidebarOpen && selectedSceneForEditor && (
+                      <button 
+                        onClick={() => setIsNodeSidebarOpen(true)}
+                        className="absolute top-4 right-4 z-10 bg-card border border-border p-2 rounded-full shadow-lg hover:bg-secondary text-foreground"
+                        title="Open Scene Editor"
+                      >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                          </svg>
+                      </button>
+                  )}
+
+                </div>
             )}
           </>
         ) : (
@@ -670,6 +805,7 @@ const AppContent: React.FC = () => {
             <p>Select a story and scene to begin editing, or create a new project.</p>
           </div>
         )}
+        </div>
       </div>
       {isCharManagerOpen && activeCharacters && (
         <CharacterManager
@@ -690,6 +826,7 @@ const AppContent: React.FC = () => {
         <AIStoryPlanner 
             onPlanGenerated={handlePlanGenerated} 
             onClose={() => setIsPlannerOpen(false)}
+            existingCharacters={activeStory?.characters}
         />
       )}
     </div>

@@ -1,4 +1,5 @@
 
+
 import React, { useCallback, useState } from 'react';
 import { Scene, ScenesData, CharactersData, DialogueItem, DialogueLength } from '../types.ts';
 import VeoGenerationModal from './VeoGenerationModal.tsx';
@@ -27,6 +28,7 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, scenes, characters, va
   const [aiDialogueLength, setAiDialogueLength] = useState<DialogueLength>('Short');
   const [aiUseContinuity, setAiUseContinuity] = useState(true);
   const [aiCustomPrompt, setAiCustomPrompt] = useState('');
+  const [aiChoreographed, setAiChoreographed] = useState(false);
 
   const handleDialogueUpdate = useCallback((newDialogue: DialogueItem[]) => {
       onUpdateScene(scene.id, { dialogue: newDialogue });
@@ -114,8 +116,8 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, scenes, characters, va
                     />
                 </div>
                 <div>
-                    <label className="block text-sm font-bold text-foreground/80 mb-1">Context</label>
-                    <div className="flex items-center h-full pt-2">
+                    <label className="block text-sm font-bold text-foreground/80 mb-1">Context & Style</label>
+                    <div className="flex items-center pt-2">
                     <input
                         type="checkbox"
                         id="ai-continuity"
@@ -125,6 +127,18 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, scenes, characters, va
                         />
                         <label htmlFor="ai-continuity" className="ml-2 block text-sm text-foreground/80">
                         Use existing dialogue
+                        </label>
+                    </div>
+                    <div className="flex items-center mt-2">
+                    <input
+                        type="checkbox"
+                        id="ai-choreographed"
+                        checked={aiChoreographed}
+                        onChange={(e) => setAiChoreographed(e.target.checked)}
+                        className="h-4 w-4 rounded border-border bg-card text-primary focus:ring-ring"
+                        />
+                        <label htmlFor="ai-choreographed" className="ml-2 block text-sm text-foreground/80">
+                        Choreographed Scene (Include Narrator Actions)
                         </label>
                     </div>
                 </div>
@@ -146,6 +160,7 @@ const SceneEditor: React.FC<SceneEditorProps> = ({ scene, scenes, characters, va
                 dialogueLength={aiDialogueLength}
                 useContinuity={aiUseContinuity}
                 aiPrompt={aiCustomPrompt}
+                choreographed={aiChoreographed}
                 />
             </div>
             )}
