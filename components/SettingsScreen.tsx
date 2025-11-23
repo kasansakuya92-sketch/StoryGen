@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useSettings } from '../contexts/SettingsContext.tsx';
 import { exportProjectAsJson } from '../utils/export.ts';
@@ -73,7 +74,6 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, projects, onRes
   };
 
   const statusClasses = {
-    // FIX: Add `dot` and `text` properties to the `idle` state to prevent TypeScript errors. Since the container is hidden when idle, this has no visual impact.
     idle: { container: 'hidden', dot: '', text: '' },
     testing: {
         container: 'bg-secondary/20',
@@ -107,6 +107,46 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, projects, onRes
         </header>
 
         <div className="space-y-6">
+           {/* About Section */}
+           <SettingsCard title="About & System Logic" description="How prompts become playable stories.">
+              <div className="space-y-4 text-sm text-foreground/80 leading-relaxed">
+                  <div className="bg-card p-4 rounded border border-border/50">
+                      <h4 className="font-bold text-primary mb-2 text-base">1. The Core Concept</h4>
+                      <p>This engine treats a Visual Novel as a <strong>Directed Graph</strong>. Each "Scene" is a Node, and every transition or choice is an Edge connecting them. The AI's primary job is to generate JSON data that describes these nodes and their connections, which the ReactFlow engine then renders visually.</p>
+                  </div>
+
+                  <div className="bg-card p-4 rounded border border-border/50">
+                      <h4 className="font-bold text-primary mb-2 text-base">2. Generation Strategies</h4>
+                      <div className="space-y-3">
+                          <div>
+                              <strong className="text-foreground">A. AI Story Planner (Top-Down)</strong>
+                              <div className="text-xs text-foreground/60 font-mono mt-0.5 mb-1">Input: "A mystery in a mansion" -> Output: Full JSON Plan</div>
+                              <p>The LLM generates a complete list of scenes and characters in a single pass. The app iterates through this list, creating Scene Nodes and calculating grid positions (X, Y) to layout the graph automatically.</p>
+                          </div>
+                          <div className="border-t border-border/30 pt-2">
+                              <strong className="text-foreground">B. Structure Generator (Context-Aware)</strong>
+                              <div className="text-xs text-foreground/60 font-mono mt-0.5 mb-1">Input: Source Scene + "Add a fight" -> Output: Sub-graph</div>
+                              <p>The LLM reads the <em>previous</em> scene's summary to understand context. It then generates a small cluster of new nodes (e.g., a Choice Node linking to two Outcome Nodes) and stitches them onto the existing graph.</p>
+                          </div>
+                          <div className="border-t border-border/30 pt-2">
+                              <strong className="text-foreground">C. Rule-Based Scheduler (Hybrid)</strong>
+                              <div className="text-xs text-foreground/60 font-mono mt-0.5 mb-1">Input: Probabilities -> Skeleton -> Output: Flavored Content</div>
+                              <p>This is the most robust method:</p>
+                              <ol className="list-decimal pl-5 mt-1 space-y-1">
+                                  <li><strong>Skeleton Gen:</strong> A deterministic algorithm (`utils/scheduler.ts`) builds a graph structure using pure logic (Linear vs. Split nodes). This guarantees a valid shape.</li>
+                                  <li><strong>Flavoring:</strong> This blank skeleton is sent to the LLM. The LLM fills in names, descriptions, and choice text based on your prompt, without breaking the pre-calculated connections.</li>
+                              </ol>
+                          </div>
+                      </div>
+                  </div>
+
+                  <div className="bg-card p-4 rounded border border-border/50">
+                      <h4 className="font-bold text-primary mb-2 text-base">3. From Text to Gameplay</h4>
+                      <p>Once nodes are generated, the <strong>Game Screen</strong> acts as an interpreter. It reads the current Scene Node's <code>dialogue</code> array line-by-line. When it hits a 'choice' object, it pauses the interpreter and waits for user input. Selecting a choice updates the <code>currentSceneId</code> pointer, moving the player to the next node in the graph.</p>
+                  </div>
+              </div>
+           </SettingsCard>
+
            <SettingsCard title="AI Provider" description="Choose a service for generating story content.">
             <div>
               <label htmlFor="aiProvider" className="block text-sm font-medium text-foreground/80">Provider</label>

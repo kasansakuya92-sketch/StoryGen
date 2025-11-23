@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Scene, CharactersData, ScenesData, AIStructureType, AIGeneratedScene } from '../types.ts';
+import { Scene, CharactersData, ScenesData, AIStructureType, AIGeneratedScene, Character } from '../types.ts';
 import { generateSceneStructure } from '../utils/ai.ts';
 import { useSettings } from '../contexts/SettingsContext.tsx';
 import MilestoneSlider, { SliderOption } from './MilestoneSlider.tsx';
@@ -10,7 +10,7 @@ interface AIStructureGenerationModalProps {
   onClose: () => void;
   allScenes: ScenesData;
   allCharacters: CharactersData;
-  onAddSceneStructure: (generated: { scenes: AIGeneratedScene[], connections: any }, sourceSceneId: string) => void;
+  onAddSceneStructure: (generated: { scenes: AIGeneratedScene[], connections: any, newCharacters?: Character[] }, sourceSceneId: string) => void;
 }
 
 const AIStructureGenerationModal: React.FC<AIStructureGenerationModalProps> = ({

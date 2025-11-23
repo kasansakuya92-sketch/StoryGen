@@ -13,7 +13,7 @@ import ProjectsHub from './components/ProjectsHub.tsx';
 import SettingsScreen from './components/SettingsScreen.tsx';
 import VariableManager from './components/VariableManager.tsx';
 import { initialProjectsData } from './story.ts';
-import { Scene, ScenesData, CharactersData, ProjectsData, Story, AIGeneratedScene, DialogueItem, SceneCharacter } from './types.ts';
+import { Scene, ScenesData, CharactersData, ProjectsData, Story, AIGeneratedScene, DialogueItem, SceneCharacter, Character } from './types.ts';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext.tsx';
 
 type GameState = 'start' | 'playing' | 'end';
@@ -542,7 +542,7 @@ const AppContent: React.FC = () => {
       setActiveStoryId(importedStory.id);
   };
 
-    const handleAddSceneStructure = useCallback((generated: { scenes: AIGeneratedScene[], connections: any }, sourceSceneId: string) => {
+    const handleAddSceneStructure = useCallback((generated: { scenes: AIGeneratedScene[], connections: any, newCharacters?: Character[] }, sourceSceneId: string) => {
         if (!activeProjectId || !activeStoryId) return;
 
         setProjects(prev => {
@@ -550,6 +550,17 @@ const AppContent: React.FC = () => {
             if (!project) return prev;
             const story = project.stories[activeStoryId];
             if (!story) return prev;
+
+            // Merge new characters first so scenes can reference them
+            const newStoryCharacters = { ...story.characters };
+            if (generated.newCharacters) {
+                generated.newCharacters.forEach(char => {
+                    // Avoid overwriting if ID exists (though generated IDs are usually unique)
+                    if (!newStoryCharacters[char.id]) {
+                        newStoryCharacters[char.id] = char;
+                    }
+                });
+            }
 
             const newScenesData = { ...story.scenes };
             const sourceScene = newScenesData[sourceSceneId];
@@ -570,7 +581,7 @@ const AppContent: React.FC = () => {
                     description: tempScene.description,
                     background: `https://picsum.photos/seed/bg-${newId}/1920/1080`,
                     characters: tempScene.characterIds
-                        .filter(id => story.characters[id])
+                        .filter(id => newStoryCharacters[id]) // Use updated characters list
                         .map((id, charIndex) => ({
                             characterId: id,
                             spriteId: 'normal',
@@ -642,7 +653,7 @@ const AppContent: React.FC = () => {
                 });
             }
 
-            const newStory = { ...story, scenes: newScenesData };
+            const newStory = { ...story, scenes: newScenesData, characters: newStoryCharacters };
             const newStories = { ...project.stories, [activeStoryId]: newStory };
             const newProject = { ...project, stories: newStories };
 

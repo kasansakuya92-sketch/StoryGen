@@ -1,4 +1,5 @@
 
+
 // types.ts
 
 export interface Sprite {
@@ -177,4 +178,11 @@ export interface AIGeneratedScene {
   dialogue: TextLine[];
   // IDs of characters present in the scene.
   characterIds: string[];
+  // Outcome of the scene (transition, choice, etc.) used for structure generation
+  outcome: {
+    type: 'transition' | 'choice' | 'end_story' | 'random' | 'condition';
+    nextSceneId?: string;
+    choices?: { text: string; nextSceneId: string }[];
+    variants?: string[];
+  };
 }

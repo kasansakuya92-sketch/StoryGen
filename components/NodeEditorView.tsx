@@ -15,9 +15,10 @@ import ReactFlow, {
   EdgeLabelRenderer,
   MarkerType,
 } from 'reactflow';
-import { ScenesData, Scene, CharactersData, AIGeneratedScene, DialogueItem, ChoiceLine, RandomLine, ConditionLine } from '../types.ts';
+import { ScenesData, Scene, CharactersData, AIGeneratedScene, DialogueItem, ChoiceLine, RandomLine, ConditionLine, Character } from '../types.ts';
 import AIGenerationModal from './AIGenerationModal.tsx';
 import AIStructureGenerationModal from './AIStructureGenerationModal.tsx';
+import RuleBasedGenerationModal from './RuleBasedGenerationModal.tsx';
 
 // Prop Interfaces
 interface NodeEditorViewProps {
@@ -27,7 +28,7 @@ interface NodeEditorViewProps {
   onAddScene: (storyId: string) => void;
   onDeleteScene: (sceneId: string) => void;
   activeStoryId: string | null;
-  onAddSceneStructure: (generated: { scenes: AIGeneratedScene[], connections: any }, sourceSceneId: string) => void;
+  onAddSceneStructure: (generated: { scenes: AIGeneratedScene[], connections: any, newCharacters?: Character[] }, sourceSceneId: string) => void;
   onSceneSelect: (sceneId: string) => void;
 }
 
@@ -98,11 +99,12 @@ const FlowSceneNode: React.FC<{ data: {
     isSelectionMode: boolean,
     selectionState: 'context' | 'target' | 'none',
     showLogicLens: boolean,
+    showStructureLens: boolean,
     onNodeClick: (sceneId: string) => void,
     onSceneSelect: (sceneId: string) => void,
     onSwapEntryType: (sceneId: string, dialogueIndex: number, newType: string) => void;
 } }> = ({ data }) => {
-  const { scene, onUpdateScene, onDeleteScene, isSelectionMode, selectionState, showLogicLens, onNodeClick, onSceneSelect, onSwapEntryType } = data;
+  const { scene, onUpdateScene, onDeleteScene, isSelectionMode, selectionState, showLogicLens, showStructureLens, onNodeClick, onSceneSelect, onSwapEntryType } = data;
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [name, setName] = useState(scene.name);
@@ -152,6 +154,23 @@ const FlowSceneNode: React.FC<{ data: {
           }
       });
       return { reqs, effects };
+  }, [scene.dialogue]);
+
+  const structureType = useMemo(() => {
+      const outcome = scene.dialogue.find(d => ['transition', 'choice', 'random', 'condition', 'end_story'].includes(d.type));
+      if (!outcome) return 'UNKNOWN';
+      if (outcome.type === 'end_story') return 'TERMINAL';
+      if (outcome.type === 'transition') return 'LINEAR';
+      if (outcome.type === 'choice') {
+           // If choices > 1 and point to DIFFERENT scenes, it's a split.
+           // If all choices point to the SAME scene (flavor choice), it's effectively linear.
+           const targets = new Set(outcome.choices.map(c => c.nextSceneId));
+           if (targets.size > 1) return 'SPLIT';
+           return 'LINEAR'; 
+      }
+      if (outcome.type === 'random') return 'SPLIT';
+      if (outcome.type === 'condition') return 'SPLIT';
+      return 'UNKNOWN';
   }, [scene.dialogue]);
 
   const hasLogic = logicSummary.reqs.length > 0 || logicSummary.effects.length > 0;
@@ -216,6 +235,15 @@ const FlowSceneNode: React.FC<{ data: {
        >
         <TrashIcon />
       </button>
+
+      {/* Structure Lens Badge */}
+      {showStructureLens && (
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap">
+              {structureType === 'LINEAR' && <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm border border-blue-400">STORY NODE</span>}
+              {structureType === 'SPLIT' && <span className="bg-orange-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm border border-orange-400">SPLIT NODE</span>}
+              {structureType === 'TERMINAL' && <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm border border-red-400">TERMINAL NODE</span>}
+          </div>
+      )}
 
       <div className="bg-secondary text-secondary-foreground px-3 py-1.5 font-bold text-sm rounded-t-md truncate" onDoubleClick={() => !isSelectionMode && setIsEditingName(true)}>
         {isEditingName ? (
@@ -423,9 +451,11 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
   const [contextIds, setContextIds] = useState<string[]>([]);
   const [targetId, setTargetId] = useState<string | null>(null);
   const [isStructureModalOpen, setIsStructureModalOpen] = useState(false);
+  const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
   
-  // State for Logic Lens
+  // State for Lenses
   const [showLogicLens, setShowLogicLens] = useState(false);
+  const [showStructureLens, setShowStructureLens] = useState(false); // Default to off
 
 
   const scenesRef = useRef(scenes);
@@ -615,10 +645,6 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
         const newDialogue = [...scene.dialogue];
         newDialogue[dialogueIndex] = newItem;
         onUpdateScene(sceneId, { dialogue: newDialogue });
-
-        // Force edge refresh logic is handled by ReactFlow diffing usually, 
-        // but we might need to ensure handles update correctly.
-        // The `setNodes` in `useEffect` will handle re-rendering handles.
   }, [onUpdateScene]);
 
   useEffect(() => {
@@ -633,6 +659,7 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
         isSelectionMode: !!selectionMode,
         selectionState: contextIds.includes(scene.id) ? 'context' : (targetId === scene.id ? 'target' : 'none'),
         showLogicLens,
+        showStructureLens,
         onNodeClick: handleNodeClick,
         onSceneSelect,
         onSwapEntryType
@@ -719,7 +746,7 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
     });
     setNodes(newNodes);
     setEdges(newEdges);
-  }, [scenes, onUpdateScene, onDeleteScene, onDeleteEdge, selectionMode, contextIds, targetId, onSwapEntryType, onSceneSelect, showLogicLens]);
+  }, [scenes, onUpdateScene, onDeleteScene, onDeleteEdge, selectionMode, contextIds, targetId, onSwapEntryType, onSceneSelect, showLogicLens, showStructureLens]);
   
   const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
     onUpdateScene(node.id, { position: node.position });
@@ -803,6 +830,12 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
             ✨ Generate Structure
           </button>
           <button
+            onClick={() => setIsRuleModalOpen(true)}
+            className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-md shadow-lg hover:bg-blue-700"
+          >
+            📐 Scheduler
+          </button>
+          <button
             onClick={handleToggleSelectionMode}
             className="px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-md shadow-lg hover:bg-primary/90"
           >
@@ -814,6 +847,12 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
           >
              {showLogicLens ? '👁️ Hide Logic' : '👁️ Logic Lens'}
           </button>
+          <button
+             onClick={() => setShowStructureLens(!showStructureLens)}
+             className={`px-4 py-2 text-sm font-semibold rounded-md shadow-lg hover:opacity-90 transition-colors ${showStructureLens ? 'bg-orange-500 text-white' : 'bg-secondary text-secondary-foreground'}`}
+          >
+             {showStructureLens ? '🔍 Hide Structure' : '🔍 Structure Lens'}
+          </button>
        </div>
        
        {isStructureModalOpen && activeStoryId && (
@@ -824,6 +863,16 @@ const NodeEditorView: React.FC<NodeEditorViewProps> = ({ scenes, characters, onU
             allCharacters={characters}
             onAddSceneStructure={onAddSceneStructure}
         />
+       )}
+       
+       {isRuleModalOpen && activeStoryId && (
+         <RuleBasedGenerationModal 
+            isOpen={isRuleModalOpen}
+            onClose={() => setIsRuleModalOpen(false)}
+            characters={characters}
+            onAddSceneStructure={onAddSceneStructure}
+            sourceSceneId={Object.keys(scenes)[0]} // Defaults to first scene for attachment if not context aware
+         />
        )}
        
        {renderSelectionPanel()}

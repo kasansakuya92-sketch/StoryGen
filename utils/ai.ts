@@ -1,5 +1,4 @@
 
-
 // utils/ai.ts
 import { GoogleGenAI, Type } from "@google/genai";
 // FIX: Import `TextLine` to use for type assertion.
@@ -317,6 +316,94 @@ export const generateDialogueFromNodes = async (
     return JSON.parse(jsonText);
 };
 
+export const fillStorySkeleton = async (
+    settings: Settings,
+    skeleton: AIGeneratedScene[],
+    characters: CharactersData,
+    prompt: string
+): Promise<AIGeneratedScene[]> => {
+    // This function takes a skeleton (nodes with types but boring text) and flavors it.
+    if (settings.aiProvider === 'local') {
+        // Fallback for local AI (stub)
+        return skeleton; 
+    }
+
+    const ai = getGoogleAI();
+    
+    const skeletonSummary = skeleton.map(s => {
+        // Safe access to nextSceneId for transitions
+        let next = '';
+        if (s.outcome.type === 'transition') next = s.outcome.nextSceneId || '';
+        if (s.outcome.type === 'choice') next = (s.outcome.choices || []).map(c => c.nextSceneId).join(' OR ');
+        return `- ID: ${s.id} (Type: ${s.name.substring(0,3)}). Connects to: ${next || 'End'}`;
+    }).join('\n');
+    
+    const charList = Object.values(characters).map(c => c.name).join(', ');
+
+    const fullPrompt = `
+    You are a narrative designer. I have a generated story structure (skeleton) with nodes and connections.
+    Your task is to rewrite the 'name', 'description', and 'dialogue' summary for EACH node to fit a specific story theme.
+    
+    USER PROMPT: "${prompt}"
+    CHARACTERS: ${charList}
+    
+    SKELETON STRUCTURE:
+    ${skeletonSummary}
+    
+    INSTRUCTIONS:
+    - Return a JSON array of objects.
+    - Each object must correspond to a node in the skeleton.
+    - Use the EXACT 'id' from the skeleton.
+    - Provide a creative 'name' (e.g., "The Dark Forest" instead of "Linear Node 1").
+    - Provide a 'description' summary of the scene events.
+    - Provide 'characterIds' (array of strings) for characters present in this scene.
+    - Do NOT change the structure (connections/IDs).
+    - If the node has choices, provide a 'choiceLabels' array with new text for the options.
+    `;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: fullPrompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        id: { type: Type.STRING },
+                        name: { type: Type.STRING },
+                        description: { type: Type.STRING },
+                        characterIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        choiceLabels: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    },
+                    required: ['id', 'name', 'description']
+                }
+            }
+        },
+    });
+
+    const enrichedData = JSON.parse(response.text.trim());
+    
+    // Merge enriched data back into skeleton
+    return skeleton.map(node => {
+        const enriched = enrichedData.find((d: any) => d.id === node.id);
+        if (!enriched) return node;
+
+        const newNode = { ...node, name: enriched.name, description: enriched.description, characterIds: enriched.characterIds || [] };
+        
+        // Update choice text if present
+        if (newNode.outcome.type === 'choice' && enriched.choiceLabels && Array.isArray(newNode.outcome.choices)) {
+            newNode.outcome.choices = newNode.outcome.choices.map((c, i) => ({
+                ...c,
+                text: enriched.choiceLabels[i] || c.text
+            }));
+        }
+        
+        return newNode;
+    });
+};
+
 
 const storyPlanSchema = {
     type: Type.OBJECT,
@@ -591,4 +678,61 @@ export const generateCharacterDetails = async (
     });
 
     return JSON.parse(response.text.trim());
+};
+
+export const generateCast = async (
+    settings: Settings,
+    prompt: string,
+    count: number = 3
+): Promise<Character[]> => {
+    if (settings.aiProvider === 'local') {
+        // Fallback for local - just generate one placeholder or loop
+        // For simplicity, returning empty or simple mock
+        return [];
+    }
+
+    const ai = getGoogleAI();
+
+    const fullPrompt = `
+    You are a creative character designer. Based on the story theme: "${prompt}", create a cast of ${count} diverse and interesting characters.
+
+    Respond with a JSON array of character objects.
+    Each object must have:
+    - "id": A short, unique, lowercase ID (e.g., 'elara').
+    - "name": Full name.
+    - "appearance": Visual description.
+    - "talkingStyle": Description of how they speak.
+    - "gender": 'male', 'female', 'trans', or 'neutral'.
+    `;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: fullPrompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        id: { type: Type.STRING },
+                        name: { type: Type.STRING },
+                        appearance: { type: Type.STRING },
+                        talkingStyle: { type: Type.STRING },
+                        gender: { type: Type.STRING, enum: ['male', 'female', 'trans', 'neutral'] }
+                    },
+                    required: ['id', 'name', 'appearance', 'talkingStyle', 'gender']
+                }
+            }
+        }
+    });
+
+    const rawChars = JSON.parse(response.text.trim());
+    
+    // Hydrate with default sprites
+    return rawChars.map((c: any) => ({
+        ...c,
+        defaultSpriteId: 'normal',
+        sprites: [{ id: 'normal', url: `https://picsum.photos/seed/${c.id}/600/800` }]
+    }));
 };
